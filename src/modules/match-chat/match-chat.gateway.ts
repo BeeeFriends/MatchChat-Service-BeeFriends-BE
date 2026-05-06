@@ -1,71 +1,105 @@
+import { Logger } from '@nestjs/common';
 import {
-  WebSocketGateway,
-  SubscribeMessage,
-  MessageBody,
-  WebSocketServer,
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
 import { ChatService } from './match-chat.service';
-import {
-  CreateMessageDto,
+import { PresenceService } from './presence.service';
+import { CHAT_EVENTS, CreateMessageDto } from '@beefriends/shared-kernel/dto';
+import type {
   MessageDto,
-  CHAT_EVENTS,
+  PresenceDto,
+  MessageReadEvent,
   TypingIndicatorEvent,
-  MessageReadEvent
-} from '@beefriends/shared-kernel';
+} from '@beefriends/shared-kernel/dto';
 
 @WebSocketGateway({
   cors: {
     origin: '*',
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
-  private logger: Logger = new Logger('ChatGateway');
+  private readonly logger = new Logger(ChatGateway.name);
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly presenceService: PresenceService,
+    private readonly pubSub: PubSubService,
+  ) {}
 
-  handleConnection(client: Socket, ...args: any[]) {
+  afterInit(server: Server) {
+    this.presenceService.bindServer(server);
+    void this.pubSub
+      .subscribe(PUBSUB_CHANNELS.CHAT_MESSAGES, (payload) =>
+        this.broadcastMessageCreated(payload),
+      )
+      .catch((error: Error) => {
+        this.logger.error(
+          `Failed to subscribe to chat messages: ${error.message}`,
+          error.stack,
+        );
+      });
+  }
+
+  async handleConnection(client: Socket) {
+    const userId = this.getHandshakeUserId(client);
+    if (userId) {
+      await client.join(this.getUserRoom(userId));
+      await this.presenceService.markOnline(userId, client.id);
+    }
+
     this.logger.log(`Client connected: ${client.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
+    await this.presenceService.markOffline(client.id);
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   @SubscribeMessage(CHAT_EVENTS.JOIN_CONVERSATION)
-  handleJoinConversation(
-    @MessageBody() data: { conversationId: string; userId: string },
+  async handleJoinConversation(
+    @MessageBody() data: { conversationId: string; userId: number },
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(data.conversationId);
-    this.logger.log(`User ${data.userId} joined conversation ${data.conversationId}`);
+    await this.chatService.ensureConversationExists(data.conversationId);
+    await client.join(data.conversationId);
+    this.logger.log(
+      `User ${data.userId} joined conversation ${data.conversationId}`,
+    );
   }
 
   @SubscribeMessage(CHAT_EVENTS.LEAVE_CONVERSATION)
-  handleLeaveConversation(
-    @MessageBody() data: { conversationId: string; userId: string },
+  async handleLeaveConversation(
+    @MessageBody() data: { conversationId: string; userId: number },
     @ConnectedSocket() client: Socket,
   ) {
-    client.leave(data.conversationId);
-    this.logger.log(`User ${data.userId} left conversation ${data.conversationId}`);
+    await client.leave(data.conversationId);
+    this.logger.log(
+      `User ${data.userId} left conversation ${data.conversationId}`,
+    );
   }
 
   @SubscribeMessage(CHAT_EVENTS.SEND_MESSAGE)
   async handleSendMessage(
-    @MessageBody() data: CreateMessageDto & { senderId: string },
-    @ConnectedSocket() client: Socket,
+    @MessageBody() data: CreateMessageDto & { senderId: number },
   ): Promise<MessageDto> {
-    const message = await this.chatService.createMessage(data, data.senderId);
-
-    // Emit to all participants in the conversation
-    this.server.to(data.conversationId).emit(CHAT_EVENTS.MESSAGE_RECEIVED, message);
+    const message = await this.chatService.createMessage(
+      data,
+      Number(data.senderId),
+    );
 
     this.logger.log(`Message sent in conversation ${data.conversationId}`);
     return message;
@@ -92,7 +126,57 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: MessageReadEvent,
     @ConnectedSocket() client: Socket,
   ) {
-    // Broadcast to other participants that message was read
     client.to(data.conversationId).emit(CHAT_EVENTS.MESSAGE_READ, data);
+  }
+
+  @SubscribeMessage(CHAT_EVENTS.PRESENCE_GET)
+  getPresence(
+    @MessageBody() data: { userIds: number[] },
+  ): Promise<PresenceDto[]> {
+    return this.presenceService.getStatuses(data.userIds ?? []);
+  }
+
+  private getHandshakeUserId(client: Socket) {
+    const auth = client.handshake.auth as { userId?: unknown };
+    const query = client.handshake.query as { userId?: string | string[] };
+    const rawUserId: unknown = auth.userId ?? query.userId;
+    const value: unknown = Array.isArray(rawUserId)
+      ? (rawUserId as unknown[])[0]
+      : rawUserId;
+    const userId = Number(value);
+
+    return Number.isInteger(userId) && userId > 0 ? userId : null;
+  }
+
+  private getUserRoom(userId: number) {
+    return `user:${userId}`;
+  }
+
+  private broadcastMessageCreated(payload: unknown) {
+    if (!this.isMessageCreatedPayload(payload)) return;
+
+    this.server
+      .to(payload.conversationId)
+      .emit(CHAT_EVENTS.MESSAGE_RECEIVED, payload.message);
+  }
+
+  private isMessageCreatedPayload(payload: unknown): payload is {
+    type: 'message.created';
+    conversationId: string;
+    message: MessageDto;
+  } {
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      'type' in payload &&
+      payload.type === 'message.created' &&
+      'conversationId' in payload &&
+      typeof payload.conversationId === 'string' &&
+      'message' in payload &&
+      typeof payload.message === 'object' &&
+      payload.message !== null &&
+      'id' in payload.message &&
+      typeof payload.message.id === 'string'
+    );
   }
 }
