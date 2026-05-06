@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { MatchChatController } from './match-chat.controller';
-import { MatchChatService } from './match-chat.service';
+import { ChatController, ConversationController } from './chat.controller';
+import { ChatGateway } from './match-chat.gateway';
+import { ChatService } from './match-chat.service';
 
 @Module({
-  controllers: [MatchChatController],
-  providers: [MatchChatService],
-  exports: [MatchChatService],
+  controllers: [ChatController, ConversationController],
+  providers: [ChatGateway, ChatService],
 })
-export class MatchChatModule {}
+export class ChatModule {}

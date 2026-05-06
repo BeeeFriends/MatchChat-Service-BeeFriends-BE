@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  displayName   String?
+  binusianEmail String?  @unique
+  phoneNumber   String?
+  binusianYear  Int?
+  description   String?
+  profilePhotoUrl String?
+  campusId      Int?
+  majorId       Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conversations ConversationParticipant[]
+  messages      Message[]
+}
+
+model Conversation {
+  id                   String   @id @default(cuid())
+  name                 String?
+  description          String?
+  isGroup              Boolean  @default(false)
+  lastMessageId        String?
+  lastMessagePreview   String?
+  lastMessageSenderId  String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  participants         ConversationParticipant[]
+  messages             Message[]
+}
+
+model ConversationParticipant {
+  id             String @id @default(cuid())
+  conversationId String
+  userId         String
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id                String   @id @default(cuid())
+  conversationId    String
+  senderId          String
+  content           String
+  attachmentUrls    String[]
+  isEdited          Boolean  @default(false)
+  isDeleted         Boolean  @default(false)
+  readBy            String[]
+  replyToMessageId  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender            User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyToMessage    Message? @relation("MessageReplies", fields: [replyToMessageId], references: [id])
+  replies           Message[] @relation("MessageReplies")
+}
