@@ -1,72 +1,69 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/match-chat-client"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id            String   @id @default(cuid())
-  displayName   String?
-  binusianEmail String?  @unique
-  phoneNumber   String?
-  binusianYear  Int?
-  description   String?
-  profilePhotoUrl String?
-  campusId      Int?
-  majorId       Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  conversations ConversationParticipant[]
-  messages      Message[]
-}
-
 model Conversation {
-  id                   String   @id @default(cuid())
-  name                 String?
-  description          String?
-  isGroup              Boolean  @default(false)
-  lastMessageId        String?
-  lastMessagePreview   String?
-  lastMessageSenderId  String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String?
+  description         String?
+  isGroup             Boolean  @default(false)
+  lastMessageId       String?
+  lastMessagePreview  String?
+  lastMessageSenderId Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  participants         ConversationParticipant[]
-  messages             Message[]
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([updatedAt])
 }
 
 model ConversationParticipant {
   id             String @id @default(cuid())
   conversationId String
-  userId         String
+  userId         Int
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
+  @@index([userId])
 }
 
 model Message {
-  id                String   @id @default(cuid())
-  conversationId    String
-  senderId          String
-  content           String
-  attachmentUrls    String[]
-  isEdited          Boolean  @default(false)
-  isDeleted         Boolean  @default(false)
-  readBy            String[]
-  replyToMessageId  String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String   @id @default(cuid())
+  conversationId   String
+  senderId         Int
+  content          String
+  attachmentUrls   String[] @default([])
+  isEdited         Boolean  @default(false)
+  isDeleted        Boolean  @default(false)
+  readBy           Int[]    @default([])
+  replyToMessageId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender            User @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  replyToMessage    Message? @relation("MessageReplies", fields: [replyToMessageId], references: [id])
-  replies           Message[] @relation("MessageReplies")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  replyToMessage Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id])
+  replies        Message[]    @relation("MessageReplies")
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+model PresenceSession {
+  id         String   @id @default(cuid())
+  userId     Int
+  socketId   String   @unique
+  instanceId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([instanceId])
 }
