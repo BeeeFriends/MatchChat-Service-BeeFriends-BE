@@ -1,36 +1,47 @@
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { HttpExceptionFilter, ResponseInterceptor } from './common';
 
 async function bootstrap() {
+  const apiPrefix = process.env.API_PREFIX ?? 'api/v1/chat';
+  const docsPath = process.env.API_DOCS_PATH ?? 'api/docs/match-chat';
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS for WebSocket connections
-  app.enableCors();
+  app.setGlobalPrefix(apiPrefix);
+  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) =>
+    origin.trim(),
+  ) ?? ['*'];
+  app.enableCors({ origin: corsOrigins, credentials: true });
 
-  // Global validation pipes
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+    }),
+  );
+  app.useGlobalInterceptors(new ResponseInterceptor());
+  app.useGlobalFilters(new HttpExceptionFilter());
 
-  // Swagger setup
   const config = new DocumentBuilder()
-    .setTitle('Chat Service API')
-    .setDescription('BeeFriends Chat Microservice API')
+    .setTitle('BeeFriends - Match Chat Service')
+    .setDescription('API documentation for BeeFriends Match Chat Service')
     .setVersion('1.0')
-    .addTag('messages', 'Message operations')
-    .addTag('conversations', 'Conversation operations')
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  SwaggerModule.setup(docsPath, app, document);
 
-  await app.listen(3002);
-  console.log('🚀 Chat Service running on: http://localhost:3002');
-  console.log('📚 Swagger docs available at: http://localhost:3002/api');
+  const port = process.env.PORT ?? 3003;
+  await app.listen(port);
+
+  console.log(`Match Chat Service running on http://localhost:${port}`);
+  console.log(`API prefix          http://localhost:${port}/${apiPrefix}`);
+  console.log(`Swagger docs        http://localhost:${port}/${docsPath}`);
 }
 
-bootstrap();
+void bootstrap();
