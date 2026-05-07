@@ -29,7 +29,7 @@ export class HobbySyncService implements OnModuleInit {
 
     if (payload.type === 'hobby.deleted') {
       await this.prisma.$transaction(async (tx) => {
-        await tx.userHobbySnapshot.deleteMany({
+        await tx.trUserHobby.deleteMany({
           where: { hobbyId: payload.hobbyId },
         });
         await tx.msHobby.updateMany({

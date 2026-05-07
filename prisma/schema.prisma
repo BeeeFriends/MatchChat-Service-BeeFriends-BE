@@ -31,8 +31,8 @@ model MsUser {
   receivedMatchSwipes MatchSwipe[]              @relation("ReceivedMatchSwipes")
   matchesAsFirstUser  UserMatch[]               @relation("FirstUserMatches")
   matchesAsSecondUser UserMatch[]               @relation("SecondUserMatches")
-  hobbies             UserHobbySnapshot[]
-  photos              UserPhotoSnapshot[]
+  hobbies             TrUserHobby[]
+  photos              TrUserPhoto[]
 
   @@index([isActive])
   @@index([campusId])
@@ -76,14 +76,14 @@ model MsHobby {
   syncedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users UserHobbySnapshot[]
+  users TrUserHobby[]
 
   @@index([isActive])
   @@index([name])
   @@map("MsHobby")
 }
 
-model UserHobbySnapshot {
+model TrUserHobby {
   userId  Int
   hobbyId Int
 
@@ -92,10 +92,10 @@ model UserHobbySnapshot {
 
   @@id([userId, hobbyId])
   @@index([hobbyId])
-  @@map("user_hobby_snapshots")
+  @@map("TrUserHobby")
 }
 
-model UserPhotoSnapshot {
+model TrUserPhoto {
   userId    Int
   photoId   Int
   url       String
@@ -106,7 +106,7 @@ model UserPhotoSnapshot {
 
   @@id([userId, photoId])
   @@index([userId, sortOrder])
-  @@map("user_photo_snapshots")
+  @@map("TrUserPhoto")
 }
 
 enum MatchDecision {

@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type {
   UserEventPayload,
-  UserSnapshotPayload,
 } from '@beefriends/shared-kernel';
 import { PUBSUB_CHANNELS, PubSubService } from '../../../common/pub-sub';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -28,6 +27,8 @@ type NormalizedPhoto = {
   sortOrder: number;
   isProfile: boolean;
 };
+
+type SyncedUserPayload = Extract<UserEventPayload, { user: unknown }>['user'];
 
 @Injectable()
 export class UserSyncService implements OnModuleInit {
@@ -139,7 +140,7 @@ export class UserSyncService implements OnModuleInit {
         },
       });
 
-      await tx.userHobbySnapshot.deleteMany({ where: { userId: user.id } });
+      await tx.trUserHobby.deleteMany({ where: { userId: user.id } });
       if (hobbies.length) {
         for (const hobby of hobbies) {
           await tx.msHobby.upsert({
@@ -158,7 +159,7 @@ export class UserSyncService implements OnModuleInit {
           });
         }
 
-        await tx.userHobbySnapshot.createMany({
+        await tx.trUserHobby.createMany({
           data: hobbies.map((hobby) => ({
             userId: user.id,
             hobbyId: hobby.hobbyId,
@@ -166,9 +167,9 @@ export class UserSyncService implements OnModuleInit {
         });
       }
 
-      await tx.userPhotoSnapshot.deleteMany({ where: { userId: user.id } });
+      await tx.trUserPhoto.deleteMany({ where: { userId: user.id } });
       if (photos.length) {
-        await tx.userPhotoSnapshot.createMany({
+        await tx.trUserPhoto.createMany({
           data: photos.map((photo) => ({
             userId: user.id,
             photoId: photo.photoId,
@@ -183,7 +184,7 @@ export class UserSyncService implements OnModuleInit {
     this.logger.log(`Synced user ${user.id} from pubsub`);
   }
 
-  private normalizeCampus(user: UserSnapshotPayload): NormalizedCampus | null {
+  private normalizeCampus(user: SyncedUserPayload): NormalizedCampus | null {
     const campusId = user.campusId ?? user.campus?.id;
     const name = user.campusName ?? user.campus?.name;
 
@@ -196,7 +197,7 @@ export class UserSyncService implements OnModuleInit {
     };
   }
 
-  private normalizeMajor(user: UserSnapshotPayload): NormalizedMajor | null {
+  private normalizeMajor(user: SyncedUserPayload): NormalizedMajor | null {
     const majorId = user.majorId ?? user.major?.id;
     const name = user.majorName ?? user.major?.name;
 
@@ -206,7 +207,7 @@ export class UserSyncService implements OnModuleInit {
   }
 
   private normalizeHobbies(
-    hobbies: UserSnapshotPayload['hobbies'],
+    hobbies: SyncedUserPayload['hobbies'],
   ): NormalizedHobby[] {
     const uniqueHobbies = new Map<number, NormalizedHobby>();
 
@@ -222,7 +223,7 @@ export class UserSyncService implements OnModuleInit {
   }
 
   private normalizePhotos(
-    photos: UserSnapshotPayload['photos'],
+    photos: SyncedUserPayload['photos'],
   ): NormalizedPhoto[] {
     const uniquePhotos = new Map<number, NormalizedPhoto>();
 
