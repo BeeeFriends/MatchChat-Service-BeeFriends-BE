@@ -12,4 +12,5 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
-CMD ["node", "dist/main"]
+COPY --from=builder /app/node_modules/@prisma/match-chat-client ./node_modules/@prisma/match-chat-client
+CMD ["node", "dist/src/main.js"]
