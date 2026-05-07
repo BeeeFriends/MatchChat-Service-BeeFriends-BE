@@ -58,10 +58,10 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.connectionString =
-      process.env.PUBSUB_DATABASE_URL ?? process.env.MATCH_CHAT_DATABASE_URL;
+      process.env.MATCH_CHAT_DATABASE_URL ?? process.env.PUBSUB_DATABASE_URL;
     if (!this.connectionString) {
       this.logger.warn(
-        'PUBSUB_DATABASE_URL or MATCH_CHAT_DATABASE_URL is not set; pubsub is local only',
+        'MATCH_CHAT_DATABASE_URL or PUBSUB_DATABASE_URL is not set; pubsub is local only',
       );
       return;
     }
