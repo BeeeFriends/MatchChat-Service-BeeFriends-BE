@@ -2,17 +2,36 @@ import { Module } from '@nestjs/common';
 import {
   ChatController,
   ConversationController,
+  MatchController,
   PresenceController,
 } from './match-chat.controller';
 import { PubSubModule } from '../../common/pub-sub';
 import { ChatGateway } from './match-chat.gateway';
 import { ChatService } from './match-chat.service';
 import { PresenceService } from './presence.service';
-import { UserSyncService } from './user-sync.service';
+import { MatchService } from './match.service';
+import {
+  HobbySyncService,
+  ProfileMasterSyncService,
+  UserSyncService,
+} from './sync';
 
 @Module({
   imports: [PubSubModule],
-  controllers: [ChatController, ConversationController, PresenceController],
-  providers: [ChatGateway, ChatService, PresenceService, UserSyncService],
+  controllers: [
+    ChatController,
+    ConversationController,
+    MatchController,
+    PresenceController,
+  ],
+  providers: [
+    ChatGateway,
+    ChatService,
+    HobbySyncService,
+    MatchService,
+    PresenceService,
+    ProfileMasterSyncService,
+    UserSyncService,
+  ],
 })
 export class ChatModule {}

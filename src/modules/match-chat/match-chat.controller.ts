@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -21,11 +22,20 @@ import {
   ConversationWithMessagesDto,
   CreateConversationDto,
   CreateMessageDto,
+  DiscoverMatchesQueryDto,
+  MatchDto,
+  MatchProfileCampusDto,
+  MatchProfileHobbyDto,
+  MatchProfileMajorDto,
+  MatchProfileDto,
   MessageDto,
   PresenceDto,
   PresenceQueryDto,
+  SwipeResultDto,
+  SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
 import { PresenceService } from './presence.service';
+import { MatchService } from './match.service';
 
 @ApiTags('messages')
 @Controller('messages')
@@ -122,6 +132,115 @@ export class ConversationController {
     const conversation = await this.chatService.getConversation(id);
     if (!conversation) throw new NotFoundException('Conversation not found');
     return conversation;
+  }
+}
+
+@ApiTags('matches')
+@Controller('matches')
+export class MatchController {
+  constructor(private readonly matchService: MatchService) {}
+
+  @Get('discover')
+  @ApiOperation({ summary: 'Discover match candidates' })
+  @ApiResponse({
+    status: 200,
+    description: 'Match candidates retrieved successfully',
+    type: [MatchProfileDto],
+  })
+  discover(
+    @Query() query: DiscoverMatchesQueryDto,
+  ): Promise<MatchProfileDto[]> {
+    return this.matchService.discover(query);
+  }
+
+  @Post('swipe')
+  @ApiOperation({ summary: 'Like or pass a user' })
+  @ApiResponse({
+    status: 201,
+    description: 'Swipe recorded successfully',
+    type: SwipeResultDto,
+  })
+  swipe(@Body() dto: SwipeUserDto): Promise<SwipeResultDto> {
+    return this.matchService.swipe(dto);
+  }
+
+  @Get('user/:userId')
+  @ApiOperation({ summary: 'Get user matches' })
+  @ApiParam({ name: 'userId', description: 'User ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Matches retrieved successfully',
+    type: [MatchDto],
+  })
+  getUserMatches(
+    @Param('userId', ParseIntPipe) userId: number,
+  ): Promise<MatchDto[]> {
+    return this.matchService.getMatches(userId);
+  }
+
+  @Get('campuses')
+  @ApiOperation({ summary: 'Get synced campuses for match filters' })
+  @ApiResponse({
+    status: 200,
+    description: 'Campuses retrieved successfully',
+    type: [MatchProfileCampusDto],
+  })
+  getCampuses(): Promise<MatchProfileCampusDto[]> {
+    return this.matchService.getCampuses();
+  }
+
+  @Get('majors')
+  @ApiOperation({ summary: 'Get synced majors for match filters' })
+  @ApiResponse({
+    status: 200,
+    description: 'Majors retrieved successfully',
+    type: [MatchProfileMajorDto],
+  })
+  getMajors(): Promise<MatchProfileMajorDto[]> {
+    return this.matchService.getMajors();
+  }
+
+  @Get('hobbies')
+  @ApiOperation({ summary: 'Get synced hobbies for match filters' })
+  @ApiResponse({
+    status: 200,
+    description: 'Hobbies retrieved successfully',
+    type: [MatchProfileHobbyDto],
+  })
+  getHobbies(): Promise<MatchProfileHobbyDto[]> {
+    return this.matchService.getHobbies();
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get match by ID' })
+  @ApiParam({ name: 'id', description: 'Match ID' })
+  @ApiQuery({ name: 'userId', type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Match retrieved successfully',
+    type: MatchDto,
+  })
+  getMatch(
+    @Param('id') id: string,
+    @Query('userId', ParseIntPipe) userId: number,
+  ): Promise<MatchDto> {
+    return this.matchService.getMatchByIdForUser(id, userId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Unmatch a user' })
+  @ApiParam({ name: 'id', description: 'Match ID' })
+  @ApiQuery({ name: 'userId', type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'User unmatched successfully',
+    type: MatchDto,
+  })
+  unmatch(
+    @Param('id') id: string,
+    @Query('userId', ParseIntPipe) userId: number,
+  ): Promise<MatchDto> {
+    return this.matchService.unmatch(id, userId);
   }
 }
 
