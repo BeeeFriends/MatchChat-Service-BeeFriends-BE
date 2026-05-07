@@ -7,6 +7,110 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id              Int      @id
+  displayName     String?
+  binusianEmail   String?  @unique
+  phoneNumber     String?
+  binusianYear    Int?
+  description     String?
+  profilePhotoUrl String?
+  campusId        Int?
+  majorId         Int?
+  isActive        Boolean  @default(true)
+  syncedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  campus              Campus?                   @relation(fields: [campusId], references: [id])
+  major               Major?                    @relation(fields: [majorId], references: [id])
+  conversations       ConversationParticipant[]
+  messages            Message[]
+  sentMatchSwipes     MatchSwipe[]              @relation("SentMatchSwipes")
+  receivedMatchSwipes MatchSwipe[]              @relation("ReceivedMatchSwipes")
+  matchesAsFirstUser  UserMatch[]               @relation("FirstUserMatches")
+  matchesAsSecondUser UserMatch[]               @relation("SecondUserMatches")
+  hobbies             UserHobbySnapshot[]
+  photos              UserPhotoSnapshot[]
+
+  @@index([isActive])
+  @@index([campusId])
+  @@index([majorId])
+}
+
+model Campus {
+  id        Int      @id
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  syncedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model Major {
+  id        Int      @id
+  name      String
+  isActive  Boolean  @default(true)
+  syncedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model Hobby {
+  id        Int      @id
+  name      String
+  isActive  Boolean  @default(true)
+  syncedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users UserHobbySnapshot[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model UserHobbySnapshot {
+  userId  Int
+  hobbyId Int
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hobby Hobby @relation(fields: [hobbyId], references: [id])
+
+  @@id([userId, hobbyId])
+  @@index([hobbyId])
+}
+
+model UserPhotoSnapshot {
+  userId    Int
+  photoId   Int
+  url       String
+  sortOrder Int     @default(0)
+  isProfile Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, photoId])
+  @@index([userId, sortOrder])
+}
+
+enum MatchDecision {
+  LIKE
+  PASS
+}
+
+enum MatchStatus {
+  ACTIVE
+  UNMATCHED
+}
+
 model Conversation {
   id                  String   @id @default(cuid())
   name                String?
@@ -30,9 +134,44 @@ model ConversationParticipant {
   userId         Int
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
 
   @@unique([conversationId, userId])
   @@index([userId])
+}
+
+model MatchSwipe {
+  id        String        @id @default(cuid())
+  swiperId  Int
+  targetId  Int
+  decision  MatchDecision
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  swiper User @relation("SentMatchSwipes", fields: [swiperId], references: [id])
+  target User @relation("ReceivedMatchSwipes", fields: [targetId], references: [id])
+
+  @@unique([swiperId, targetId])
+  @@index([targetId, decision])
+}
+
+model UserMatch {
+  id             String      @id @default(cuid())
+  firstUserId    Int
+  secondUserId   Int
+  status         MatchStatus @default(ACTIVE)
+  conversationId String?     @unique
+  matchedAt      DateTime    @default(now())
+  unmatchedAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  firstUser  User @relation("FirstUserMatches", fields: [firstUserId], references: [id])
+  secondUser User @relation("SecondUserMatches", fields: [secondUserId], references: [id])
+
+  @@unique([firstUserId, secondUserId])
+  @@index([firstUserId, status])
+  @@index([secondUserId, status])
 }
 
 model Message {
@@ -49,6 +188,7 @@ model Message {
   updatedAt        DateTime @updatedAt
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id])
   replyToMessage Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id])
   replies        Message[]    @relation("MessageReplies")
 

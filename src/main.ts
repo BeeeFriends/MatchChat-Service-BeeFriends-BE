@@ -5,8 +5,8 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter, ResponseInterceptor } from './common';
 
 async function bootstrap() {
-  const apiPrefix = process.env.API_PREFIX ?? 'api/v1/chat';
-  const docsPath = process.env.API_DOCS_PATH ?? 'api/docs/match-chat';
+  const apiPrefix = process.env.API_PREFIX ?? 'v1/matchchat';
+  const docsPath = process.env.API_DOCS_PATH ?? 'v1/matchchat/docs';
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix(apiPrefix);
