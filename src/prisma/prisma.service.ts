@@ -9,7 +9,8 @@ export class PrismaService
 {
   constructor() {
     const adapter = new PrismaPg({
-      connectionString: process.env.MATCH_CHAT_DATABASE_URL,
+      connectionString:
+        process.env.MATCH_CHAT_DATABASE_URL ?? process.env.DATABASE_URL,
     });
     super({ adapter });
   }
