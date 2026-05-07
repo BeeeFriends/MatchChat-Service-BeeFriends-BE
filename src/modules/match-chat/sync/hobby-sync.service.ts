@@ -32,7 +32,7 @@ export class HobbySyncService implements OnModuleInit {
         await tx.userHobbySnapshot.deleteMany({
           where: { hobbyId: payload.hobbyId },
         });
-        await tx.hobby.updateMany({
+        await tx.msHobby.updateMany({
           where: { id: payload.hobbyId },
           data: { isActive: false, syncedAt: new Date() },
         });
@@ -40,7 +40,7 @@ export class HobbySyncService implements OnModuleInit {
       return;
     }
 
-    await this.prisma.hobby.upsert({
+    await this.prisma.msHobby.upsert({
       where: { id: payload.hobby.id },
       update: {
         name: payload.hobby.name,

@@ -7,7 +7,7 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
+model MsUser {
   id              Int      @id
   displayName     String?
   binusianEmail   String?  @unique
@@ -23,8 +23,8 @@ model User {
   syncedAt        DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  campus              Campus?                   @relation(fields: [campusId], references: [id])
-  major               Major?                    @relation(fields: [majorId], references: [id])
+  campus              MsCampus?                 @relation(fields: [campusId], references: [id])
+  major               MsDepartment?             @relation(fields: [majorId], references: [id])
   conversations       ConversationParticipant[]
   messages            Message[]
   sentMatchSwipes     MatchSwipe[]              @relation("SentMatchSwipes")
@@ -37,9 +37,10 @@ model User {
   @@index([isActive])
   @@index([campusId])
   @@index([majorId])
+  @@map("MsUser")
 }
 
-model Campus {
+model MsCampus {
   id        Int      @id
   name      String
   address   String?
@@ -47,26 +48,28 @@ model Campus {
   syncedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users MsUser[]
 
   @@index([isActive])
   @@index([name])
+  @@map("MsCampus")
 }
 
-model Major {
+model MsDepartment {
   id        Int      @id
   name      String
   isActive  Boolean  @default(true)
   syncedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users MsUser[]
 
   @@index([isActive])
   @@index([name])
+  @@map("MsDepartment")
 }
 
-model Hobby {
+model MsHobby {
   id        Int      @id
   name      String
   isActive  Boolean  @default(true)
@@ -77,17 +80,19 @@ model Hobby {
 
   @@index([isActive])
   @@index([name])
+  @@map("MsHobby")
 }
 
 model UserHobbySnapshot {
   userId  Int
   hobbyId Int
 
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  hobby Hobby @relation(fields: [hobbyId], references: [id])
+  user  MsUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hobby MsHobby @relation(fields: [hobbyId], references: [id])
 
   @@id([userId, hobbyId])
   @@index([hobbyId])
+  @@map("user_hobby_snapshots")
 }
 
 model UserPhotoSnapshot {
@@ -97,10 +102,11 @@ model UserPhotoSnapshot {
   sortOrder Int     @default(0)
   isProfile Boolean @default(false)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user MsUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, photoId])
   @@index([userId, sortOrder])
+  @@map("user_photo_snapshots")
 }
 
 enum MatchDecision {
@@ -128,6 +134,7 @@ model Conversation {
   messages     Message[]
 
   @@index([updatedAt])
+  @@map("conversations")
 }
 
 model ConversationParticipant {
@@ -136,10 +143,11 @@ model ConversationParticipant {
   userId         Int
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id])
+  user         MsUser       @relation(fields: [userId], references: [id])
 
   @@unique([conversationId, userId])
   @@index([userId])
+  @@map("conversation_participants")
 }
 
 model MatchSwipe {
@@ -150,11 +158,12 @@ model MatchSwipe {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
-  swiper User @relation("SentMatchSwipes", fields: [swiperId], references: [id])
-  target User @relation("ReceivedMatchSwipes", fields: [targetId], references: [id])
+  swiper MsUser @relation("SentMatchSwipes", fields: [swiperId], references: [id])
+  target MsUser @relation("ReceivedMatchSwipes", fields: [targetId], references: [id])
 
   @@unique([swiperId, targetId])
   @@index([targetId, decision])
+  @@map("match_swipes")
 }
 
 model UserMatch {
@@ -168,12 +177,13 @@ model UserMatch {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  firstUser  User @relation("FirstUserMatches", fields: [firstUserId], references: [id])
-  secondUser User @relation("SecondUserMatches", fields: [secondUserId], references: [id])
+  firstUser  MsUser @relation("FirstUserMatches", fields: [firstUserId], references: [id])
+  secondUser MsUser @relation("SecondUserMatches", fields: [secondUserId], references: [id])
 
   @@unique([firstUserId, secondUserId])
   @@index([firstUserId, status])
   @@index([secondUserId, status])
+  @@map("user_matches")
 }
 
 model Message {
@@ -190,12 +200,13 @@ model Message {
   updatedAt        DateTime @updatedAt
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User         @relation(fields: [senderId], references: [id])
+  sender         MsUser       @relation(fields: [senderId], references: [id])
   replyToMessage Message?     @relation("MessageReplies", fields: [replyToMessageId], references: [id])
   replies        Message[]    @relation("MessageReplies")
 
   @@index([conversationId, createdAt])
   @@index([senderId])
+  @@map("messages")
 }
 
 model PresenceSession {
@@ -208,4 +219,5 @@ model PresenceSession {
 
   @@index([userId])
   @@index([instanceId])
+  @@map("presence_sessions")
 }

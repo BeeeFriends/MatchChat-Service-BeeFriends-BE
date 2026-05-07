@@ -18,7 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
-type UserProfileRecord = Prisma.UserGetPayload<{
+type UserProfileRecord = Prisma.MsUserGetPayload<{
   include: {
     campus: true;
     major: true;
@@ -94,7 +94,7 @@ export class MatchService {
       );
     }
 
-    const where: Prisma.UserWhereInput = {
+    const where: Prisma.MsUserWhereInput = {
       id: { notIn: Array.from(excludedUserIds) },
       isActive: true,
       campusId: query.campusId,
@@ -104,7 +104,7 @@ export class MatchService {
         : undefined,
     };
 
-    const users = await this.prisma.user.findMany({
+    const users = await this.prisma.msUser.findMany({
       where,
       include: userProfileInclude,
       orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
@@ -236,7 +236,7 @@ export class MatchService {
   }
 
   async getCampuses(): Promise<MatchProfileCampusDto[]> {
-    const campuses = await this.prisma.campus.findMany({
+    const campuses = await this.prisma.msCampus.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
     });
@@ -249,7 +249,7 @@ export class MatchService {
   }
 
   async getMajors(): Promise<MatchProfileMajorDto[]> {
-    const majors = await this.prisma.major.findMany({
+    const majors = await this.prisma.msDepartment.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
     });
@@ -261,7 +261,7 @@ export class MatchService {
   }
 
   async getHobbies(): Promise<MatchProfileHobbyDto[]> {
-    const hobbies = await this.prisma.hobby.findMany({
+    const hobbies = await this.prisma.msHobby.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
     });
@@ -313,7 +313,7 @@ export class MatchService {
     client: PrismaClientLike = this.prisma,
   ) {
     const uniqueUserIds = Array.from(new Set(userIds));
-    const users = await client.user.findMany({
+    const users = await client.msUser.findMany({
       where: { id: { in: uniqueUserIds }, isActive: true },
       select: { id: true },
     });

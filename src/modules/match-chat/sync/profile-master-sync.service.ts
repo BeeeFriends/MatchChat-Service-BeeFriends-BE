@@ -40,14 +40,14 @@ export class ProfileMasterSyncService implements OnModuleInit {
     if (!this.isCampusEventPayload(payload)) return;
 
     if (payload.type === 'campus.deleted') {
-      await this.prisma.campus.updateMany({
+      await this.prisma.msCampus.updateMany({
         where: { id: payload.campusId },
         data: { isActive: false, syncedAt: new Date() },
       });
       return;
     }
 
-    await this.prisma.campus.upsert({
+    await this.prisma.msCampus.upsert({
       where: { id: payload.campus.id },
       update: {
         name: payload.campus.name,
@@ -71,14 +71,14 @@ export class ProfileMasterSyncService implements OnModuleInit {
     if (!this.isDepartmentEventPayload(payload)) return;
 
     if (payload.type === 'department.deleted') {
-      await this.prisma.major.updateMany({
+      await this.prisma.msDepartment.updateMany({
         where: { id: payload.departmentId },
         data: { isActive: false, syncedAt: new Date() },
       });
       return;
     }
 
-    await this.prisma.major.upsert({
+    await this.prisma.msDepartment.upsert({
       where: { id: payload.department.id },
       update: {
         name: payload.department.name,

@@ -54,7 +54,7 @@ export class UserSyncService implements OnModuleInit {
     if (!this.isUserEventPayload(payload)) return;
 
     if (payload.type === 'user.deleted') {
-      await this.prisma.user.updateMany({
+      await this.prisma.msUser.updateMany({
         where: { id: payload.userId },
         data: { isActive: false, syncedAt: new Date() },
       });
@@ -71,7 +71,7 @@ export class UserSyncService implements OnModuleInit {
       const syncedAt = new Date();
 
       if (campus) {
-        await tx.campus.upsert({
+        await tx.msCampus.upsert({
           where: { id: campus.campusId },
           update: {
             name: campus.name,
@@ -90,7 +90,7 @@ export class UserSyncService implements OnModuleInit {
       }
 
       if (major) {
-        await tx.major.upsert({
+        await tx.msDepartment.upsert({
           where: { id: major.majorId },
           update: {
             name: major.name,
@@ -106,7 +106,7 @@ export class UserSyncService implements OnModuleInit {
         });
       }
 
-      await tx.user.upsert({
+      await tx.msUser.upsert({
         where: { id: user.id },
         update: {
           displayName: user.displayName,
@@ -142,7 +142,7 @@ export class UserSyncService implements OnModuleInit {
       await tx.userHobbySnapshot.deleteMany({ where: { userId: user.id } });
       if (hobbies.length) {
         for (const hobby of hobbies) {
-          await tx.hobby.upsert({
+          await tx.msHobby.upsert({
             where: { id: hobby.hobbyId },
             update: {
               name: hobby.name,
