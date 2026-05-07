@@ -12,6 +12,8 @@ model User {
   displayName     String?
   binusianEmail   String?  @unique
   phoneNumber     String?
+  gender          String?
+  age             Int?
   binusianYear    Int?
   description     String?
   profilePhotoUrl String?

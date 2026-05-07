@@ -364,6 +364,8 @@ export class MatchService {
       displayName: user.displayName,
       binusianEmail: user.binusianEmail,
       phoneNumber: user.phoneNumber,
+      gender: user.gender,
+      age: user.age,
       binusianYear: user.binusianYear,
       description: user.description,
       profilePhotoUrl: user.profilePhotoUrl,
