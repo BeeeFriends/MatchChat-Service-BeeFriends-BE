@@ -122,11 +122,29 @@ export class ChatGateway
   }
 
   @SubscribeMessage(CHAT_EVENTS.MESSAGE_READ)
-  handleMessageRead(
+  async handleMessageRead(
     @MessageBody() data: MessageReadEvent,
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() _client: Socket,
   ) {
-    client.to(data.conversationId).emit(CHAT_EVENTS.MESSAGE_READ, data);
+    const message = await this.chatService.markMessageRead(
+      data.conversationId,
+      data.messageId,
+      Number(data.userId),
+    );
+    const participantIds = await this.chatService.getConversationParticipantIds(
+      data.conversationId,
+    );
+    const event: MessageReadEvent = {
+      conversationId: data.conversationId,
+      messageId: message.id,
+      userId: Number(data.userId),
+    };
+
+    this.server
+      .to(this.getRealtimeRooms(data.conversationId, participantIds))
+      .emit(CHAT_EVENTS.MESSAGE_READ, event);
+
+    return event;
   }
 
   @SubscribeMessage(CHAT_EVENTS.PRESENCE_GET)
@@ -152,17 +170,30 @@ export class ChatGateway
     return `user:${userId}`;
   }
 
+  private getRealtimeRooms(conversationId: string, userIds: number[]) {
+    return [
+      conversationId,
+      ...Array.from(new Set(userIds)).map((userId) => this.getUserRoom(userId)),
+    ];
+  }
+
   private broadcastMessageCreated(payload: unknown) {
     if (!this.isMessageCreatedPayload(payload)) return;
 
     this.server
-      .to(payload.conversationId)
+      .to(
+        this.getRealtimeRooms(
+          payload.conversationId,
+          payload.participantIds ?? [],
+        ),
+      )
       .emit(CHAT_EVENTS.MESSAGE_RECEIVED, payload.message);
   }
 
   private isMessageCreatedPayload(payload: unknown): payload is {
     type: 'message.created';
     conversationId: string;
+    participantIds?: number[];
     message: MessageDto;
   } {
     return (

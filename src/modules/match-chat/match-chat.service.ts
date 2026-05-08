@@ -111,6 +111,71 @@ export class ChatService {
     return messages.map((message) => this.toMessageDto(message));
   }
 
+  async markMessageRead(
+    conversationId: string,
+    messageId: string,
+    userId: number,
+  ): Promise<MessageDto> {
+    await this.ensureConversationAvailable(conversationId);
+
+    const message = await this.prisma.$transaction(async (tx) => {
+      const participant = await tx.conversationParticipant.findUnique({
+        where: {
+          conversationId_userId: {
+            conversationId,
+            userId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!participant) {
+        throw new BadRequestException(
+          'Reader is not a participant in this conversation',
+        );
+      }
+
+      const existingMessage = await tx.message.findFirst({
+        where: {
+          id: messageId,
+          conversationId,
+          isDeleted: false,
+        },
+      });
+
+      if (!existingMessage) {
+        throw new NotFoundException('Message not found');
+      }
+
+      if (
+        existingMessage.senderId === userId ||
+        existingMessage.readBy.includes(userId)
+      ) {
+        return existingMessage;
+      }
+
+      return tx.message.update({
+        where: { id: messageId },
+        data: {
+          readBy: {
+            push: userId,
+          },
+        },
+      });
+    });
+
+    return this.toMessageDto(message);
+  }
+
+  async getConversationParticipantIds(conversationId: string) {
+    const participants = await this.prisma.conversationParticipant.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+
+    return participants.map((participant) => participant.userId);
+  }
+
   async createConversation(
     createConversationDto: CreateConversationDto,
   ): Promise<ConversationDto> {
