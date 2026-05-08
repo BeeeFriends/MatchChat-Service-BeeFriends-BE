@@ -56,6 +56,7 @@ export class ChatService {
     senderId: number,
   ): Promise<MessageDto> {
     await this.ensureUsersSynced([senderId]);
+    await this.ensureConversationAvailable(createMessageDto.conversationId);
 
     const message = await this.prisma.$transaction(async (tx) => {
       const participant = await tx.conversationParticipant.findUnique({
@@ -139,8 +140,13 @@ export class ChatService {
   }
 
   async getConversations(userId: number): Promise<ConversationDto[]> {
+    const hiddenConversationIds = await this.getHiddenConversationIds(userId);
+
     const conversations = await this.prisma.conversation.findMany({
       where: {
+        id: hiddenConversationIds.length
+          ? { notIn: hiddenConversationIds }
+          : undefined,
         participants: {
           some: { userId },
         },
@@ -162,6 +168,8 @@ export class ChatService {
   }
 
   async getConversation(id: string): Promise<ConversationDto | null> {
+    if (await this.isConversationHidden(id)) return null;
+
     const conversation = await this.prisma.conversation.findUnique({
       where: { id },
       include: {
@@ -181,6 +189,8 @@ export class ChatService {
   async getConversationWithMessages(
     id: string,
   ): Promise<ConversationWithMessagesDto | null> {
+    if (await this.isConversationHidden(id)) return null;
+
     const conversation = await this.prisma.conversation.findUnique({
       where: { id },
       include: {
@@ -209,6 +219,42 @@ export class ChatService {
     });
 
     if (!conversation) throw new NotFoundException('Conversation not found');
+    await this.ensureConversationAvailable(id);
+  }
+
+  private async ensureConversationAvailable(id: string) {
+    if (await this.isConversationHidden(id)) {
+      throw new BadRequestException('Conversation is no longer available');
+    }
+  }
+
+  private async isConversationHidden(id: string) {
+    const unmatchedMatch = await this.prisma.userMatch.findFirst({
+      where: {
+        conversationId: id,
+        status: 'UNMATCHED',
+      },
+      select: { id: true },
+    });
+
+    return Boolean(unmatchedMatch);
+  }
+
+  private async getHiddenConversationIds(userId: number) {
+    const unmatchedMatches = await this.prisma.userMatch.findMany({
+      where: {
+        status: 'UNMATCHED',
+        conversationId: { not: null },
+        OR: [{ firstUserId: userId }, { secondUserId: userId }],
+      },
+      select: { conversationId: true },
+    });
+
+    return unmatchedMatches
+      .map((match) => match.conversationId)
+      .filter((conversationId): conversationId is string =>
+        Boolean(conversationId),
+      );
   }
 
   private toMessageDto(message: MessageRecord): MessageDto {

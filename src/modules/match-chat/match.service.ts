@@ -297,12 +297,29 @@ export class MatchService {
 
     if (!currentMatch) throw new NotFoundException('Match not found');
 
-    await this.prisma.userMatch.update({
-      where: { id },
-      data: {
-        status: 'UNMATCHED',
-        unmatchedAt: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userMatch.update({
+        where: { id },
+        data: {
+          status: 'UNMATCHED',
+          unmatchedAt: new Date(),
+        },
+      });
+
+      await tx.matchSwipe.deleteMany({
+        where: {
+          OR: [
+            {
+              swiperId: currentMatch.firstUserId,
+              targetId: currentMatch.secondUserId,
+            },
+            {
+              swiperId: currentMatch.secondUserId,
+              targetId: currentMatch.firstUserId,
+            },
+          ],
+        },
+      });
     });
 
     return this.getMatchByIdForUser(id, userId);
