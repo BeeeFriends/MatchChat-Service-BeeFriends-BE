@@ -316,9 +316,15 @@ export class ChatService {
 
   private async publishMessageCreated(message: MessageDto) {
     try {
+      const participants = await this.prisma.conversationParticipant.findMany({
+        where: { conversationId: message.conversationId },
+        select: { userId: true },
+      });
+
       await this.pubSub.publish(PUBSUB_CHANNELS.CHAT_MESSAGES, {
         type: 'message.created',
         conversationId: message.conversationId,
+        participantIds: participants.map((participant) => participant.userId),
         message,
       });
     } catch (error) {

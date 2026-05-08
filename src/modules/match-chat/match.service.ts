@@ -14,6 +14,7 @@ import {
   SwipeResultDto,
   SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
+import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
@@ -66,7 +67,10 @@ const matchInclude = {
 
 @Injectable()
 export class MatchService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pubSub: PubSubService,
+  ) {}
 
   async discover(query: DiscoverMatchesQueryDto): Promise<MatchProfileDto[]> {
     const userId = Number(query.userId);
@@ -187,7 +191,7 @@ export class MatchService {
       });
 
       if (existingMatch?.status === 'ACTIVE') {
-        return { isMatch: true, matchId: existingMatch.id };
+        return { isMatch: true, matchId: existingMatch.id, shouldNotify: false };
       }
 
       const conversationId =
@@ -222,8 +226,12 @@ export class MatchService {
             },
           });
 
-      return { isMatch: true, matchId: match.id };
+      return { isMatch: true, matchId: match.id, shouldNotify: true };
     });
+
+    if (result.isMatch && result.matchId && result.shouldNotify) {
+      await this.publishMatchCreated(result.matchId);
+    }
 
     return {
       swiperId,
@@ -448,5 +456,28 @@ export class MatchService {
   private clampLimit(limit?: number) {
     if (!limit) return 20;
     return Math.min(Math.max(limit, 1), 50);
+  }
+
+  private async publishMatchCreated(matchId: string) {
+    try {
+      const match = await this.prisma.userMatch.findUnique({
+        where: { id: matchId },
+        select: {
+          id: true,
+          firstUserId: true,
+          secondUserId: true,
+          conversationId: true,
+        },
+      });
+
+      if (!match) return;
+
+      await this.pubSub.publish(PUBSUB_CHANNELS.MATCH_EVENTS, {
+        type: 'match.created',
+        match,
+      });
+    } catch {
+      // Matching must not fail because notification delivery is unavailable.
+    }
   }
 }

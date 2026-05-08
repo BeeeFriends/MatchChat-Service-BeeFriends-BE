@@ -12,6 +12,7 @@ export const PUBSUB_CHANNELS = {
   CHAT_MESSAGES: 'match_chat_messages',
   DEPARTMENT_EVENTS: 'department_events',
   HOBBY_EVENTS: 'hobby_events',
+  MATCH_EVENTS: 'match_events',
   PRESENCE: 'match_chat_presence',
   USER_EVENTS: 'user_events',
 } as const;
