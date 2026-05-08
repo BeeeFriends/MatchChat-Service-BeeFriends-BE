@@ -85,9 +85,25 @@ export class MatchService {
       },
       select: { firstUserId: true, secondUserId: true },
     });
+    const unmatchedMatches = await this.prisma.userMatch.findMany({
+      where: {
+        status: 'UNMATCHED',
+        OR: [{ firstUserId: userId }, { secondUserId: userId }],
+      },
+      select: { firstUserId: true, secondUserId: true },
+    });
+    const unmatchedUserIds = new Set(
+      unmatchedMatches.map((match) =>
+        match.firstUserId === userId ? match.secondUserId : match.firstUserId,
+      ),
+    );
 
     const excludedUserIds = new Set<number>([userId]);
-    for (const swipe of swipes) excludedUserIds.add(swipe.targetId);
+    for (const swipe of swipes) {
+      if (!unmatchedUserIds.has(swipe.targetId)) {
+        excludedUserIds.add(swipe.targetId);
+      }
+    }
     for (const match of activeMatches) {
       excludedUserIds.add(
         match.firstUserId === userId ? match.secondUserId : match.firstUserId,
