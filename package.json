@@ -22,7 +22,7 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@beefriends/shared-kernel": "^3.0.4",
+    "@beefriends/shared-kernel": "^4.0.1",
     "@nestjs/common": "^11.1.19",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",

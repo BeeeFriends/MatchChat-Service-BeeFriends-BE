@@ -40,6 +40,9 @@ type ConversationRecord = {
   updatedAt: Date;
   participants?: { userId: number }[];
   messages?: MessageRecord[];
+  _count?: {
+    messages?: number;
+  };
 };
 
 @Injectable()
@@ -216,14 +219,7 @@ export class ChatService {
           some: { userId },
         },
       },
-      include: {
-        participants: true,
-        messages: {
-          where: { isDeleted: false },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
+      include: this.getConversationListInclude(userId),
       orderBy: { updatedAt: 'desc' },
     });
 
@@ -358,8 +354,35 @@ export class ChatService {
       lastMessagePreview: conversation.lastMessagePreview,
       lastMessageSenderId: conversation.lastMessageSenderId,
       lastMessage,
+      unreadCount: conversation._count?.messages ?? 0,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
+    } as ConversationDto & { unreadCount: number };
+  }
+
+  private getConversationListInclude(userId: number) {
+    return {
+      participants: true,
+      messages: {
+        where: { isDeleted: false },
+        orderBy: { createdAt: 'desc' as const },
+        take: 1,
+      },
+      _count: {
+        select: {
+          messages: {
+            where: {
+              isDeleted: false,
+              senderId: { not: userId },
+              NOT: {
+                readBy: {
+                  has: userId,
+                },
+              },
+            },
+          },
+        },
+      },
     };
   }
 
