@@ -70,6 +70,36 @@ export class ChatController {
   ): Promise<MessageDto[]> {
     return this.chatService.getMessages(conversationId);
   }
+
+  @Post(':messageId/read')
+  @ApiOperation({ summary: 'Mark a message as read' })
+  @ApiParam({ name: 'messageId', description: 'Message ID' })
+  @ApiQuery({ name: 'conversationId', type: String })
+  @ApiQuery({ name: 'userId', type: Number })
+  @ApiResponse({
+    status: 201,
+    description: 'Message marked as read',
+    type: MessageDto,
+  })
+  async markMessageRead(
+    @Param('messageId') messageId: string,
+    @Query('conversationId') conversationId: string,
+    @Query('userId', ParseIntPipe) userId: number,
+  ): Promise<MessageDto> {
+    const message = await this.chatService.markMessageRead(
+      conversationId,
+      messageId,
+      userId,
+    );
+
+    await this.chatService.publishMessageRead({
+      conversationId,
+      messageId: message.id,
+      userId,
+    });
+
+    return message;
+  }
 }
 
 @ApiTags('conversations')

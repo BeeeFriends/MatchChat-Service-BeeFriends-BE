@@ -12,6 +12,7 @@ import {
   CreateConversationDto,
   CreateMessageDto,
   MessageDto,
+  MessageReadEvent,
 } from '@beefriends/shared-kernel/dto';
 
 type MessageRecord = {
@@ -168,6 +169,26 @@ export class ChatService {
     });
 
     return this.toMessageDto(message);
+  }
+
+  async publishMessageRead(event: MessageReadEvent) {
+    try {
+      const participantIds = await this.getConversationParticipantIds(
+        event.conversationId,
+      );
+
+      await this.pubSub.publish(PUBSUB_CHANNELS.CHAT_READS, {
+        type: 'message.read',
+        ...event,
+        participantIds,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to publish read receipt ${event.messageId}: ${
+          (error as Error).message
+        }`,
+      );
+    }
   }
 
   async getConversationParticipantIds(conversationId: string) {
@@ -408,11 +429,20 @@ export class ChatService {
         where: { conversationId: message.conversationId },
         select: { userId: true },
       });
+      const sender = await this.prisma.msUser.findUnique({
+        where: { id: message.senderId },
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true,
+        },
+      });
 
       await this.pubSub.publish(PUBSUB_CHANNELS.CHAT_MESSAGES, {
         type: 'message.created',
         conversationId: message.conversationId,
         participantIds: participants.map((participant) => participant.userId),
+        sender,
         message,
       });
     } catch (error) {

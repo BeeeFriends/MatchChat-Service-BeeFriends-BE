@@ -52,6 +52,16 @@ export class ChatGateway
           error.stack,
         );
       });
+    void this.pubSub
+      .subscribe(PUBSUB_CHANNELS.CHAT_READS, (payload) =>
+        this.broadcastMessageRead(payload),
+      )
+      .catch((error: Error) => {
+        this.logger.error(
+          `Failed to subscribe to chat reads: ${error.message}`,
+          error.stack,
+        );
+      });
   }
 
   async handleConnection(client: Socket) {
@@ -131,18 +141,13 @@ export class ChatGateway
       data.messageId,
       Number(data.userId),
     );
-    const participantIds = await this.chatService.getConversationParticipantIds(
-      data.conversationId,
-    );
     const event: MessageReadEvent = {
       conversationId: data.conversationId,
       messageId: message.id,
       userId: Number(data.userId),
     };
 
-    this.server
-      .to(this.getRealtimeRooms(data.conversationId, participantIds))
-      .emit(CHAT_EVENTS.MESSAGE_READ, event);
+    await this.chatService.publishMessageRead(event);
 
     return event;
   }
@@ -190,6 +195,25 @@ export class ChatGateway
       .emit(CHAT_EVENTS.MESSAGE_RECEIVED, payload.message);
   }
 
+  private broadcastMessageRead(payload: unknown) {
+    if (!this.isMessageReadPayload(payload)) return;
+
+    const event: MessageReadEvent = {
+      conversationId: payload.conversationId,
+      messageId: payload.messageId,
+      userId: payload.userId,
+    };
+
+    this.server
+      .to(
+        this.getRealtimeRooms(
+          payload.conversationId,
+          payload.participantIds ?? [],
+        ),
+      )
+      .emit(CHAT_EVENTS.MESSAGE_READ, event);
+  }
+
   private isMessageCreatedPayload(payload: unknown): payload is {
     type: 'message.created';
     conversationId: string;
@@ -208,6 +232,27 @@ export class ChatGateway
       payload.message !== null &&
       'id' in payload.message &&
       typeof payload.message.id === 'string'
+    );
+  }
+
+  private isMessageReadPayload(payload: unknown): payload is {
+    type: 'message.read';
+    conversationId: string;
+    messageId: string;
+    userId: number;
+    participantIds?: number[];
+  } {
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      'type' in payload &&
+      payload.type === 'message.read' &&
+      'conversationId' in payload &&
+      typeof payload.conversationId === 'string' &&
+      'messageId' in payload &&
+      typeof payload.messageId === 'string' &&
+      'userId' in payload &&
+      typeof payload.userId === 'number'
     );
   }
 }

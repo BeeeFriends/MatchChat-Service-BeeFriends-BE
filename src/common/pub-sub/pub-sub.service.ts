@@ -10,6 +10,7 @@ import type { Notification } from 'pg';
 export const PUBSUB_CHANNELS = {
   CAMPUS_EVENTS: 'campus_events',
   CHAT_MESSAGES: 'match_chat_messages',
+  CHAT_READS: 'match_chat_reads',
   DEPARTMENT_EVENTS: 'department_events',
   HOBBY_EVENTS: 'hobby_events',
   MATCH_EVENTS: 'match_events',
