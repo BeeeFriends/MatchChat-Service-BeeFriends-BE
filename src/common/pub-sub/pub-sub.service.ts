@@ -4,18 +4,17 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { Client } from 'pg';
-import type { Notification } from 'pg';
+import { createClient } from 'redis';
 
 export const PUBSUB_CHANNELS = {
-  CAMPUS_EVENTS: 'campus_events',
-  CHAT_MESSAGES: 'match_chat_messages',
-  CHAT_READS: 'match_chat_reads',
-  DEPARTMENT_EVENTS: 'department_events',
-  HOBBY_EVENTS: 'hobby_events',
-  MATCH_EVENTS: 'match_events',
-  PRESENCE: 'match_chat_presence',
-  USER_EVENTS: 'user_events',
+  CAMPUS_EVENTS: 'beefriends:campus-events',
+  CHAT_MESSAGES: 'beefriends:match-chat-messages',
+  CHAT_READS: 'beefriends:match-chat-reads',
+  DEPARTMENT_EVENTS: 'beefriends:department-events',
+  HOBBY_EVENTS: 'beefriends:hobby-events',
+  MATCH_EVENTS: 'beefriends:match-events',
+  PRESENCE: 'beefriends:match-chat-presence',
+  USER_EVENTS: 'beefriends:user-events',
 } as const;
 
 type PubSubHandler = (payload: unknown) => Promise<void> | void;
@@ -27,44 +26,41 @@ type SubscribeOptions = {
   replayFromStart?: boolean;
 };
 type DurableSubscription = {
-  consumerId: string;
+  consumerGroup: string;
+  consumerName: string;
   draining: boolean;
   pollIntervalMs: number;
   replayFromStart: boolean;
 };
-type PubSubEventRow = {
-  id: string;
-  payload: unknown;
-};
+type RedisClient = ReturnType<typeof createClient>;
 
 const DEFAULT_RECONNECT_INTERVAL_MS = 5000;
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const DEFAULT_STREAM_MAXLEN = 10000;
 const DURABLE_BATCH_SIZE = 100;
 
 @Injectable()
 export class PubSubService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PubSubService.name);
-  private readonly handlers = new Map<string, Set<PubSubHandler>>();
-  private readonly listeningChannels = new Set<string>();
+  private readonly realtimeHandlers = new Map<string, Set<PubSubHandler>>();
+  private readonly durableHandlers = new Map<string, Set<PubSubHandler>>();
   private readonly durableSubscriptions = new Map<
     string,
     DurableSubscription
   >();
+  private readonly subscribedChannels = new Set<string>();
   private readonly pollTimers = new Map<string, NodeJS.Timeout>();
-  private connectionString?: string;
-  private publisher?: Client;
-  private listener?: Client;
+  private redisUrl?: string;
+  private publisher?: RedisClient;
+  private subscriber?: RedisClient;
   private reconnectTimer?: NodeJS.Timeout;
   private connecting = false;
   private shuttingDown = false;
 
   onModuleInit() {
-    this.connectionString =
-      process.env.MATCH_CHAT_DATABASE_URL ?? process.env.PUBSUB_DATABASE_URL;
-    if (!this.connectionString) {
-      this.logger.warn(
-        'MATCH_CHAT_DATABASE_URL or PUBSUB_DATABASE_URL is not set; pubsub is local only',
-      );
+    this.redisUrl = process.env.REDIS_URL;
+    if (!this.redisUrl) {
+      this.logger.warn('REDIS_URL is not set; redis pubsub is local only');
       return;
     }
 
@@ -86,32 +82,40 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
   async publish(
     channel: string,
     payload: unknown,
-    options: PublishOptions = {},
+    _options: PublishOptions = {},
   ) {
     this.assertChannel(channel);
 
-    if (options.durable) {
-      await this.publishDurable(channel, payload);
-      return;
-    }
+    const serializedPayload = JSON.stringify(payload);
 
-    if (!this.publisher) {
-      await this.dispatch(channel, payload);
-      this.scheduleReconnect();
+    if (!this.publisher?.isReady) {
+      await this.dispatch(channel, payload, false);
+      void this.connectWithRetry();
       return;
     }
 
     try {
-      await this.publisher.query('SELECT pg_notify($1, $2)', [
+      await this.publisher.xAdd(
         channel,
-        JSON.stringify(payload),
-      ]);
+        '*',
+        { payload: serializedPayload },
+        {
+          TRIM: {
+            strategy: 'MAXLEN',
+            strategyModifier: '~',
+            threshold: this.getStreamMaxLen(),
+          },
+        },
+      );
+      await this.publisher.publish(channel, serializedPayload);
     } catch (error) {
       this.logger.warn(
-        `Pubsub publish failed for ${channel}: ${(error as Error).message}`,
+        `Redis pubsub publish failed for ${channel}: ${
+          (error as Error).message
+        }`,
       );
       this.scheduleReconnect();
-      await this.dispatch(channel, payload);
+      await this.dispatch(channel, payload, false);
     }
   }
 
@@ -122,41 +126,45 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
   ) {
     this.assertChannel(channel);
 
-    const handlers = this.handlers.get(channel) ?? new Set<PubSubHandler>();
+    const handlerMap = options.durable
+      ? this.durableHandlers
+      : this.realtimeHandlers;
+    const handlers = handlerMap.get(channel) ?? new Set<PubSubHandler>();
     handlers.add(handler);
-    this.handlers.set(channel, handlers);
+    handlerMap.set(channel, handlers);
 
     if (options.durable) {
+      const consumerGroup =
+        options.consumerId ??
+        process.env.PUBSUB_CONSUMER_ID ??
+        `match-chat:${channel}`;
       const subscription: DurableSubscription = {
-        consumerId:
-          options.consumerId ??
-          process.env.PUBSUB_CONSUMER_ID ??
-          `match-chat:${channel}`,
+        consumerGroup,
+        consumerName: this.getConsumerName(consumerGroup),
         draining: false,
         pollIntervalMs:
           options.pollIntervalMs ??
-          this.getNumberEnv(
-            'PUBSUB_POLL_INTERVAL_MS',
-            DEFAULT_POLL_INTERVAL_MS,
-          ),
+          this.getNumberEnv('PUBSUB_POLL_INTERVAL_MS', DEFAULT_POLL_INTERVAL_MS),
         replayFromStart: options.replayFromStart ?? true,
       };
       this.durableSubscriptions.set(channel, subscription);
       this.startPolling(channel);
 
-      if (this.publisher) {
-        await this.ensureDurableOffset(channel, subscription);
+      if (this.publisher?.isReady) {
+        await this.ensureConsumerGroup(channel, subscription);
         void this.drainDurableChannel(channel);
       }
     }
 
-    if (this.listener) {
-      await this.listen(channel);
+    if (this.subscriber?.isReady) {
+      await this.subscribeChannel(channel);
+    } else {
+      void this.connectWithRetry();
     }
   }
 
   private async connectWithRetry() {
-    if (this.connecting || this.shuttingDown || !this.connectionString) return;
+    if (this.connecting || this.shuttingDown || !this.redisUrl) return;
 
     this.connecting = true;
 
@@ -164,43 +172,34 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
       try {
         await this.disconnectClients();
 
-        const publisher = new Client({
-          connectionString: this.connectionString,
-        });
-        const listener = new Client({
-          connectionString: this.connectionString,
-        });
+        const publisher = this.createRedisClient();
+        const subscriber = this.createRedisClient();
 
         this.bindClientLifecycle(publisher, 'publisher');
-        this.bindClientLifecycle(listener, 'listener');
-        listener.on('notification', (notification) => {
-          void this.handleNotification(notification);
-        });
+        this.bindClientLifecycle(subscriber, 'subscriber');
 
         await publisher.connect();
-        await listener.connect();
+        await subscriber.connect();
 
         this.publisher = publisher;
-        this.listener = listener;
-        this.listeningChannels.clear();
+        this.subscriber = subscriber;
+        this.subscribedChannels.clear();
 
-        await this.ensureDurableTables();
-
-        for (const channel of this.handlers.keys()) {
-          await this.listen(channel);
+        for (const channel of this.getKnownChannels()) {
+          await this.subscribeChannel(channel);
         }
 
         for (const [channel, subscription] of this.durableSubscriptions) {
-          await this.ensureDurableOffset(channel, subscription);
+          await this.ensureConsumerGroup(channel, subscription);
           this.startPolling(channel);
           void this.drainDurableChannel(channel);
         }
 
-        this.logger.log('Pubsub connected');
+        this.logger.log('Redis pubsub connected');
         break;
       } catch (error) {
         this.logger.warn(
-          `Pubsub connect failed, retrying: ${(error as Error).message}`,
+          `Redis pubsub connect failed, retrying: ${(error as Error).message}`,
         );
         await this.disconnectClients();
         await this.delay(this.getReconnectIntervalMs());
@@ -210,16 +209,25 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
     this.connecting = false;
   }
 
-  private bindClientLifecycle(client: Client, name: string) {
+  private createRedisClient() {
+    return createClient({
+      url: this.redisUrl,
+      socket: {
+        reconnectStrategy: (retries) =>
+          Math.min(this.getReconnectIntervalMs() * (retries + 1), 30000),
+      },
+    });
+  }
+
+  private bindClientLifecycle(client: RedisClient, name: string) {
     client.on('error', (error: Error) => {
       if (this.shuttingDown) return;
-      this.logger.warn(`Pubsub ${name} error: ${error.message}`);
-      this.scheduleReconnect();
+      this.logger.warn(`Redis pubsub ${name} error: ${error.message}`);
     });
 
     client.on('end', () => {
       if (this.shuttingDown) return;
-      this.logger.warn(`Pubsub ${name} disconnected`);
+      this.logger.warn(`Redis pubsub ${name} disconnected`);
       this.scheduleReconnect();
     });
   }
@@ -236,270 +244,197 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
 
   private async disconnectClients() {
     const publisher = this.publisher;
-    const listener = this.listener;
+    const subscriber = this.subscriber;
 
     this.publisher = undefined;
-    this.listener = undefined;
-    this.listeningChannels.clear();
+    this.subscriber = undefined;
+    this.subscribedChannels.clear();
 
-    await Promise.allSettled([publisher?.end(), listener?.end()]);
+    await Promise.allSettled([
+      publisher?.quit().catch(() => publisher.destroy()),
+      subscriber?.quit().catch(() => subscriber.destroy()),
+    ]);
   }
 
-  private async publishDurable(channel: string, payload: unknown) {
-    if (!this.publisher) {
-      throw new Error('Pubsub publisher is not connected');
+  private async subscribeChannel(channel: string) {
+    if (this.subscribedChannels.has(channel) || !this.subscriber?.isReady) {
+      return;
     }
 
-    await this.ensureDurableTables();
+    await this.subscriber.subscribe(channel, (message) => {
+      void this.handlePubSubMessage(channel, message);
+    });
+    this.subscribedChannels.add(channel);
+  }
 
-    const event = await this.publisher.query<{ id: string }>(
-      `
-        INSERT INTO pubsub_events (channel, payload)
-        VALUES ($1, $2::jsonb)
-        RETURNING id
-      `,
-      [channel, JSON.stringify(payload)],
-    );
-
+  private async handlePubSubMessage(channel: string, message: string) {
     try {
-      await this.publisher.query('SELECT pg_notify($1, $2)', [
-        channel,
-        JSON.stringify({ eventId: event.rows[0].id }),
-      ]);
+      const payload = JSON.parse(message) as unknown;
+      await this.dispatch(channel, payload, false);
+
+      if (this.durableSubscriptions.has(channel)) {
+        void this.drainDurableChannel(channel);
+      }
     } catch (error) {
       this.logger.warn(
-        `Durable pubsub notify failed for ${channel}: ${
+        `Invalid redis pubsub payload on ${channel}: ${
           (error as Error).message
         }`,
       );
-      this.scheduleReconnect();
     }
   }
 
-  private async listen(channel: string) {
-    if (this.listeningChannels.has(channel) || !this.listener) return;
-
-    await this.listener.query(`LISTEN ${channel}`);
-    this.listeningChannels.add(channel);
-  }
-
-  private async handleNotification(notification: Notification) {
-    if (!notification.channel || !notification.payload) return;
+  private async ensureConsumerGroup(
+    channel: string,
+    subscription: DurableSubscription,
+  ) {
+    if (!this.publisher?.isReady) return;
 
     try {
-      const payload = JSON.parse(notification.payload) as unknown;
-
-      if (
-        this.durableSubscriptions.has(notification.channel) &&
-        this.isDurableNotification(payload)
-      ) {
-        await this.drainDurableChannel(notification.channel);
-        return;
+      await this.publisher.xGroupCreate(
+        channel,
+        subscription.consumerGroup,
+        subscription.replayFromStart ? '0' : '$',
+        { MKSTREAM: true },
+      );
+    } catch (error) {
+      if (!this.isBusyGroupError(error)) {
+        throw error;
       }
-
-      await this.dispatch(notification.channel, payload);
-    } catch {
-      this.logger.warn(`Invalid pubsub payload on ${notification.channel}`);
     }
+  }
+
+  private startPolling(channel: string) {
+    if (this.pollTimers.has(channel)) return;
+
+    const subscription = this.durableSubscriptions.get(channel);
+    if (!subscription) return;
+
+    this.pollTimers.set(
+      channel,
+      setInterval(() => {
+        void this.drainDurableChannel(channel);
+      }, subscription.pollIntervalMs),
+    );
   }
 
   private async drainDurableChannel(channel: string) {
     const subscription = this.durableSubscriptions.get(channel);
-    if (!subscription || !this.publisher || subscription.draining) return;
+    if (!subscription || !this.publisher?.isReady || subscription.draining) {
+      return;
+    }
 
     subscription.draining = true;
 
     try {
-      await this.ensureDurableOffset(channel, subscription);
-
-      while (!this.shuttingDown && this.publisher) {
-        const events = await this.fetchDurableEvents(channel, subscription);
-        if (!events.length) break;
-
-        for (const event of events) {
-          await this.dispatch(channel, event.payload, true);
-          await this.updateDurableOffset(channel, subscription, event.id);
-        }
-
-        if (events.length < DURABLE_BATCH_SIZE) break;
-      }
+      await this.ensureConsumerGroup(channel, subscription);
+      await this.readStreamMessages(channel, subscription, '0');
+      await this.readStreamMessages(channel, subscription, '>');
     } catch (error) {
       this.logger.warn(
-        `Durable pubsub replay failed for ${channel}: ${
-          (error as Error).message
-        }`,
+        `Redis stream drain failed for ${channel}: ${(error as Error).message}`,
       );
+      this.scheduleReconnect();
     } finally {
       subscription.draining = false;
     }
   }
 
-  private async fetchDurableEvents(
+  private async readStreamMessages(
     channel: string,
     subscription: DurableSubscription,
-  ): Promise<PubSubEventRow[]> {
-    if (!this.publisher) return [];
-
-    const offset = await this.publisher.query<{ last_event_id: string }>(
-      `
-        SELECT last_event_id
-        FROM pubsub_offsets
-        WHERE consumer_id = $1 AND channel = $2
-      `,
-      [subscription.consumerId, channel],
-    );
-    const lastEventId = offset.rows[0]?.last_event_id ?? '0';
-
-    const events = await this.publisher.query<PubSubEventRow>(
-      `
-        SELECT id::text, payload
-        FROM pubsub_events
-        WHERE channel = $1 AND id > $2::bigint
-        ORDER BY id ASC
-        LIMIT $3
-      `,
-      [channel, lastEventId, DURABLE_BATCH_SIZE],
-    );
-
-    return events.rows;
-  }
-
-  private async ensureDurableTables() {
-    if (!this.publisher) return;
-
-    await this.publisher.query(`
-      CREATE TABLE IF NOT EXISTS pubsub_events (
-        id BIGSERIAL PRIMARY KEY,
-        channel TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-    await this.publisher.query(`
-      CREATE INDEX IF NOT EXISTS idx_pubsub_events_channel_id
-      ON pubsub_events (channel, id)
-    `);
-    await this.publisher.query(`
-      CREATE TABLE IF NOT EXISTS pubsub_offsets (
-        consumer_id TEXT NOT NULL,
-        channel TEXT NOT NULL,
-        last_event_id BIGINT NOT NULL DEFAULT 0,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (consumer_id, channel)
-      )
-    `);
-  }
-
-  private async ensureDurableOffset(
-    channel: string,
-    subscription: DurableSubscription,
+    id: '0' | '>',
   ) {
-    if (!this.publisher) return;
+    while (!this.shuttingDown && this.publisher?.isReady) {
+      const streams = (await this.publisher.xReadGroup(
+        subscription.consumerGroup,
+        subscription.consumerName,
+        { key: channel, id },
+        { COUNT: DURABLE_BATCH_SIZE },
+      )) as
+        | Array<{
+            messages: Array<{
+              id: string;
+              message: Record<string, string>;
+            }>;
+          }>
+        | null;
 
-    const initialOffset = subscription.replayFromStart
-      ? '0'
-      : await this.getCurrentChannelEventId(channel);
+      const messages = streams?.flatMap((stream) => stream.messages) ?? [];
+      if (!messages.length) break;
 
-    await this.publisher.query(
-      `
-        INSERT INTO pubsub_offsets (consumer_id, channel, last_event_id)
-        VALUES ($1, $2, $3::bigint)
-        ON CONFLICT (consumer_id, channel) DO NOTHING
-      `,
-      [subscription.consumerId, channel, initialOffset],
-    );
+      for (const entry of messages) {
+        const payload = this.parseStreamPayload(entry.message.payload);
+        if (payload === undefined) {
+          await this.publisher.xAck(
+            channel,
+            subscription.consumerGroup,
+            entry.id,
+          );
+          continue;
+        }
+
+        await this.dispatch(channel, payload, true);
+        await this.publisher.xAck(channel, subscription.consumerGroup, entry.id);
+      }
+
+      if (messages.length < DURABLE_BATCH_SIZE) break;
+    }
   }
 
-  private async getCurrentChannelEventId(channel: string) {
-    if (!this.publisher) return '0';
+  private parseStreamPayload(payload?: string) {
+    if (!payload) return undefined;
 
-    const result = await this.publisher.query<{ last_event_id: string }>(
-      `
-        SELECT COALESCE(MAX(id), 0)::text AS last_event_id
-        FROM pubsub_events
-        WHERE channel = $1
-      `,
-      [channel],
-    );
-
-    return result.rows[0]?.last_event_id ?? '0';
-  }
-
-  private async updateDurableOffset(
-    channel: string,
-    subscription: DurableSubscription,
-    eventId: string,
-  ) {
-    if (!this.publisher) return;
-
-    await this.publisher.query(
-      `
-        INSERT INTO pubsub_offsets (
-          consumer_id,
-          channel,
-          last_event_id,
-          updated_at
-        )
-        VALUES ($1, $2, $3::bigint, now())
-        ON CONFLICT (consumer_id, channel)
-        DO UPDATE SET last_event_id = EXCLUDED.last_event_id,
-                      updated_at = now()
-      `,
-      [subscription.consumerId, channel, eventId],
-    );
-  }
-
-  private startPolling(channel: string) {
-    const subscription = this.durableSubscriptions.get(channel);
-    if (!subscription || this.pollTimers.has(channel)) return;
-
-    const timer = setInterval(() => {
-      void this.drainDurableChannel(channel);
-    }, subscription.pollIntervalMs);
-    this.pollTimers.set(channel, timer);
+    try {
+      return JSON.parse(payload) as unknown;
+    } catch {
+      return undefined;
+    }
   }
 
   private async dispatch(
     channel: string,
     payload: unknown,
-    bubbleErrors = false,
+    durable: boolean,
   ) {
-    const handlers = Array.from(this.handlers.get(channel) ?? []);
-    const results = await Promise.allSettled(
-      handlers.map((handler) => Promise.resolve(handler(payload))),
+    const handlers = durable
+      ? this.durableHandlers.get(channel)
+      : this.realtimeHandlers.get(channel);
+    if (!handlers?.size) return;
+
+    await Promise.all(
+      Array.from(handlers).map((handler) => Promise.resolve(handler(payload))),
     );
-
-    const rejected = results.find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    );
-
-    if (!rejected) return;
-
-    const error = rejected.reason as Error;
-    this.logger.error(
-      `Pubsub handler failed for ${channel}: ${error.message}`,
-      error.stack,
-    );
-
-    if (bubbleErrors) throw error;
   }
 
-  private isDurableNotification(payload: unknown): payload is {
-    eventId: string | number;
-  } {
+  private getKnownChannels() {
+    return new Set([
+      ...this.realtimeHandlers.keys(),
+      ...this.durableHandlers.keys(),
+      ...this.durableSubscriptions.keys(),
+    ]);
+  }
+
+  private getConsumerName(consumerGroup: string) {
     return (
-      typeof payload === 'object' &&
-      payload !== null &&
-      'eventId' in payload &&
-      (typeof payload.eventId === 'string' ||
-        typeof payload.eventId === 'number')
+      process.env.REDIS_CONSUMER_NAME ??
+      process.env.RAILWAY_REPLICA_ID ??
+      process.env.SERVICE_NAME ??
+      consumerGroup
     );
   }
 
   private assertChannel(channel: string) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(channel)) {
-      throw new Error(`Invalid pubsub channel: ${channel}`);
+    if (!/^[A-Za-z0-9:_-]+$/.test(channel)) {
+      throw new Error(`Invalid redis pubsub channel: ${channel}`);
     }
+  }
+
+  private isBusyGroupError(error: unknown) {
+    return (
+      error instanceof Error &&
+      error.message.toUpperCase().includes('BUSYGROUP')
+    );
   }
 
   private getReconnectIntervalMs() {
@@ -509,8 +444,12 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private getNumberEnv(key: string, fallback: number) {
-    const value = Number(process.env[key]);
+  private getStreamMaxLen() {
+    return this.getNumberEnv('REDIS_STREAM_MAXLEN', DEFAULT_STREAM_MAXLEN);
+  }
+
+  private getNumberEnv(name: string, fallback: number) {
+    const value = Number(process.env[name]);
     return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 

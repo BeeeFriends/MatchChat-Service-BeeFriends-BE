@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
+import { MessageEncryptionService } from '../../common/crypto/message-encryption.service';
 import {
   ConversationDto,
   ConversationWithMessagesDto,
@@ -53,6 +54,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pubSub: PubSubService,
+    private readonly messageEncryption: MessageEncryptionService,
   ) {}
 
   async createMessage(
@@ -82,7 +84,7 @@ export class ChatService {
         data: {
           conversationId: createMessageDto.conversationId,
           senderId,
-          content: createMessageDto.content,
+          content: this.messageEncryption.encrypt(createMessageDto.content),
           attachmentUrls: createMessageDto.attachmentUrls ?? [],
           replyToMessageId: createMessageDto.replyToMessageId,
         },
@@ -92,7 +94,9 @@ export class ChatService {
         where: { id: createMessageDto.conversationId },
         data: {
           lastMessageId: createdMessage.id,
-          lastMessagePreview: this.createPreview(createdMessage.content),
+          lastMessagePreview: this.messageEncryption.encrypt(
+            this.createPreview(createMessageDto.content),
+          ),
           lastMessageSenderId: senderId,
         },
       });
@@ -344,7 +348,7 @@ export class ChatService {
       id: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
-      content: message.content,
+      content: this.messageEncryption.decrypt(message.content),
       timestamp: message.createdAt,
       messageType: this.resolveMessageType(message.attachmentUrls),
       attachmentUrls: message.attachmentUrls,
@@ -372,7 +376,9 @@ export class ChatService {
       description: conversation.description,
       isGroup: conversation.isGroup,
       lastMessageId: conversation.lastMessageId,
-      lastMessagePreview: conversation.lastMessagePreview,
+      lastMessagePreview: this.messageEncryption.decryptNullable(
+        conversation.lastMessagePreview,
+      ),
       lastMessageSenderId: conversation.lastMessageSenderId,
       lastMessage,
       unreadCount: conversation._count?.messages ?? 0,
@@ -443,7 +449,7 @@ export class ChatService {
         conversationId: message.conversationId,
         participantIds: participants.map((participant) => participant.userId),
         sender,
-        message,
+        message: this.toBrokerMessage(message),
       });
     } catch (error) {
       this.logger.warn(
@@ -471,5 +477,12 @@ export class ChatService {
         `User not synced to chat service: ${missingUserIds.join(', ')}`,
       );
     }
+  }
+
+  private toBrokerMessage(message: MessageDto): MessageDto {
+    return {
+      ...message,
+      content: this.messageEncryption.encrypt(message.content),
+    };
   }
 }

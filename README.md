@@ -13,7 +13,7 @@ Matching, conversation, realtime chat, read receipt, typing, and presence servic
 - **Messages** - sends messages, loads conversation history, and marks messages as read
 - **Realtime Chat** - Socket.IO events for messages, read receipts, typing, and presence
 - **Profile Sync** - consumes user, campus, major, and hobby events from User Service
-- **Pub/Sub** - PostgreSQL `LISTEN/NOTIFY` with durable event table support
+- **Pub/Sub** - Redis Streams for durable events and Redis Pub/Sub for realtime fanout
 
 ---
 
@@ -24,7 +24,7 @@ Matching, conversation, realtime chat, read receipt, typing, and presence servic
 | Runtime | Node.js, NestJS, TypeScript |
 | Database | PostgreSQL, Prisma |
 | Realtime | Socket.IO |
-| Pub/Sub | PostgreSQL `LISTEN/NOTIFY`, durable `pubsub_events` table |
+| Pub/Sub | Redis Streams, Redis Pub/Sub |
 | Contracts | `@beefriends/shared-kernel` |
 
 ---
@@ -86,7 +86,7 @@ BeeFriends Mobile
     -> Match Chat Service
       -> PostgreSQL
       -> Socket.IO rooms
-      -> PostgreSQL pub/sub channels
+      -> Redis Streams / Pub/Sub
 ```
 
 Match and chat events are published to pub/sub so notification and realtime listeners can react without tight coupling.
@@ -103,13 +103,16 @@ CORS_ORIGINS=*
 
 MATCH_CHAT_DATABASE_URL=
 DATABASE_URL=
-PUBSUB_DATABASE_URL=
+REDIS_URL=
 PUBSUB_CONSUMER_ID=
 PUBSUB_POLL_INTERVAL_MS=5000
 PUBSUB_RECONNECT_INTERVAL_MS=5000
+REDIS_STREAM_MAXLEN=10000
+CHAT_MESSAGE_ENCRYPTION_KEY=
 ```
 
 `MATCH_CHAT_DATABASE_URL` is preferred. `DATABASE_URL` is accepted as a fallback by Prisma.
+Use the same `CHAT_MESSAGE_ENCRYPTION_KEY` in services that need to decrypt chat previews.
 
 ---
 

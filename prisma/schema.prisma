@@ -221,23 +221,3 @@ model PresenceSession {
   @@index([instanceId])
   @@map("presence_sessions")
 }
-
-model PubSubEvent {
-  id        BigInt   @id @default(autoincrement())
-  channel   String
-  payload   Json
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([channel, id], map: "idx_pubsub_events_channel_id")
-  @@map("pubsub_events")
-}
-
-model PubSubOffset {
-  consumerId  String   @map("consumer_id")
-  channel     String
-  lastEventId BigInt   @default(0) @map("last_event_id")
-  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
-
-  @@id([consumerId, channel])
-  @@map("pubsub_offsets")
-}

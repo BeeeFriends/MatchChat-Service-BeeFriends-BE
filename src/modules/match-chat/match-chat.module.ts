@@ -6,6 +6,7 @@ import {
   PresenceController,
 } from './match-chat.controller';
 import { PubSubModule } from '../../common/pub-sub';
+import { MessageEncryptionService } from '../../common/crypto/message-encryption.service';
 import { ChatGateway } from './match-chat.gateway';
 import { ChatService } from './match-chat.service';
 import { PresenceService } from './presence.service';
@@ -28,6 +29,7 @@ import {
     ChatGateway,
     ChatService,
     HobbySyncService,
+    MessageEncryptionService,
     MatchService,
     PresenceService,
     ProfileMasterSyncService,

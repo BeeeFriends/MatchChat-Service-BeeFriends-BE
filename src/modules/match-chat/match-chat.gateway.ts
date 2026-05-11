@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
+import { MessageEncryptionService } from '../../common/crypto/message-encryption.service';
 import { ChatService } from './match-chat.service';
 import { PresenceService } from './presence.service';
 import { CHAT_EVENTS, CreateMessageDto } from '@beefriends/shared-kernel/dto';
@@ -38,6 +39,7 @@ export class ChatGateway
     private readonly chatService: ChatService,
     private readonly presenceService: PresenceService,
     private readonly pubSub: PubSubService,
+    private readonly messageEncryption: MessageEncryptionService,
   ) {}
 
   afterInit(server: Server) {
@@ -192,7 +194,7 @@ export class ChatGateway
           payload.participantIds ?? [],
         ),
       )
-      .emit(CHAT_EVENTS.MESSAGE_RECEIVED, payload.message);
+      .emit(CHAT_EVENTS.MESSAGE_RECEIVED, this.decryptMessage(payload.message));
   }
 
   private broadcastMessageRead(payload: unknown) {
@@ -254,5 +256,12 @@ export class ChatGateway
       'userId' in payload &&
       typeof payload.userId === 'number'
     );
+  }
+
+  private decryptMessage(message: MessageDto): MessageDto {
+    return {
+      ...message,
+      content: this.messageEncryption.decrypt(message.content),
+    };
   }
 }
