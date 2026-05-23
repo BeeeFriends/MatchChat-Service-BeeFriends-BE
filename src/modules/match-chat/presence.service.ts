@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { Server } from 'socket.io';
-import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { PresenceRepository } from '@/modules/match-chat/presence.repository';
 import { CHAT_EVENTS, PresenceDto } from '@beefriends/shared-kernel/dto';
 
 type PresenceChangePayload = PresenceDto & {
@@ -27,7 +27,7 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   private server?: Server;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly presenceRepository: PresenceRepository,
     private readonly pubSub: PubSubService,
   ) {}
 
@@ -39,20 +39,15 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy() {
     try {
-      const sessions = await this.prisma.presenceSession.findMany({
-        where: { instanceId: this.instanceId },
-        select: { userId: true },
-        distinct: ['userId'],
-      });
+      const sessions = await this.presenceRepository.findInstanceUserSessions(
+        this.instanceId,
+      );
 
-      await this.prisma.presenceSession.deleteMany({
-        where: { instanceId: this.instanceId },
-      });
+      await this.presenceRepository.deleteInstanceSessions(this.instanceId);
 
       for (const session of sessions) {
-        const remainingSessions = await this.prisma.presenceSession.count({
-          where: { userId: session.userId },
-        });
+        const remainingSessions =
+          await this.presenceRepository.countUserSessions(session.userId);
 
         if (!remainingSessions) {
           await this.publishPresenceChange(session.userId, false, 'shutdown');
@@ -68,26 +63,11 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async markOnline(userId: number, socketId: string) {
-    const shouldPublish = await this.prisma.$transaction(async (tx) => {
-      const existingSessions = await tx.presenceSession.count({
-        where: { userId },
-      });
-
-      await tx.presenceSession.upsert({
-        where: { socketId },
-        update: {
-          userId,
-          instanceId: this.instanceId,
-        },
-        create: {
-          userId,
-          socketId,
-          instanceId: this.instanceId,
-        },
-      });
-
-      return existingSessions === 0;
-    });
+    const shouldPublish = await this.presenceRepository.markOnline(
+      userId,
+      socketId,
+      this.instanceId,
+    );
 
     if (shouldPublish) {
       await this.publishPresenceChange(userId, true, socketId);
@@ -95,24 +75,7 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async markOffline(socketId: string) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      const session = await tx.presenceSession.findUnique({
-        where: { socketId },
-      });
-
-      if (!session) return null;
-
-      await tx.presenceSession.delete({ where: { socketId } });
-
-      const remainingSessions = await tx.presenceSession.count({
-        where: { userId: session.userId },
-      });
-
-      return {
-        userId: session.userId,
-        isOffline: remainingSessions === 0,
-      };
-    });
+    const result = await this.presenceRepository.markOffline(socketId);
 
     if (result?.isOffline) {
       await this.publishPresenceChange(result.userId, false, socketId);
@@ -120,9 +83,8 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getStatus(userId: number): Promise<PresenceDto> {
-    const sessionCount = await this.prisma.presenceSession.count({
-      where: { userId },
-    });
+    const sessionCount =
+      await this.presenceRepository.countUserSessions(userId);
 
     return { userId, isOnline: sessionCount > 0 };
   }
@@ -134,11 +96,8 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
 
     if (!uniqueUserIds.length) return [];
 
-    const onlineUsers = await this.prisma.presenceSession.findMany({
-      where: { userId: { in: uniqueUserIds } },
-      select: { userId: true },
-      distinct: ['userId'],
-    });
+    const onlineUsers =
+      await this.presenceRepository.findOnlineUserIds(uniqueUserIds);
     const onlineUserIds = new Set(onlineUsers.map((user) => user.userId));
 
     return uniqueUserIds.map((userId) => ({

@@ -1,9 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import type {
-  UserEventPayload,
-} from '@beefriends/shared-kernel';
-import { PUBSUB_CHANNELS, PubSubService } from '../../../common/pub-sub';
-import { PrismaService } from '../../../prisma/prisma.service';
+import type { UserEventPayload } from '@beefriends/shared-kernel';
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { SyncRepository } from '@/modules/match-chat/sync/sync.repository';
 
 type NormalizedHobby = {
   hobbyId: number;
@@ -35,7 +33,7 @@ export class UserSyncService implements OnModuleInit {
   private readonly logger = new Logger(UserSyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly syncRepository: SyncRepository,
     private readonly pubSub: PubSubService,
   ) {}
 
@@ -55,10 +53,7 @@ export class UserSyncService implements OnModuleInit {
     if (!this.isUserEventPayload(payload)) return;
 
     if (payload.type === 'user.deleted') {
-      await this.prisma.msUser.updateMany({
-        where: { id: payload.userId },
-        data: { isActive: false, syncedAt: new Date() },
-      });
+      await this.syncRepository.deactivateUser(payload.userId);
       return;
     }
 
@@ -68,118 +63,7 @@ export class UserSyncService implements OnModuleInit {
     const hobbies = this.normalizeHobbies(user.hobbies);
     const photos = this.normalizePhotos(user.photos);
 
-    await this.prisma.$transaction(async (tx) => {
-      const syncedAt = new Date();
-
-      if (campus) {
-        await tx.msCampus.upsert({
-          where: { id: campus.campusId },
-          update: {
-            name: campus.name,
-            address: campus.address,
-            isActive: true,
-            syncedAt,
-          },
-          create: {
-            id: campus.campusId,
-            name: campus.name,
-            address: campus.address,
-            isActive: true,
-            syncedAt,
-          },
-        });
-      }
-
-      if (major) {
-        await tx.msDepartment.upsert({
-          where: { id: major.majorId },
-          update: {
-            name: major.name,
-            isActive: true,
-            syncedAt,
-          },
-          create: {
-            id: major.majorId,
-            name: major.name,
-            isActive: true,
-            syncedAt,
-          },
-        });
-      }
-
-      await tx.msUser.upsert({
-        where: { id: user.id },
-        update: {
-          displayName: user.displayName,
-          binusianEmail: user.binusianEmail,
-          phoneNumber: user.phoneNumber,
-          gender: user.gender,
-          age: user.age,
-          binusianYear: user.binusianYear,
-          description: user.description,
-          profilePhotoUrl: user.profilePhotoUrl,
-          campusId: campus?.campusId ?? null,
-          majorId: major?.majorId ?? null,
-          isActive: true,
-          syncedAt,
-        },
-        create: {
-          id: user.id,
-          displayName: user.displayName,
-          binusianEmail: user.binusianEmail,
-          phoneNumber: user.phoneNumber,
-          gender: user.gender,
-          age: user.age,
-          binusianYear: user.binusianYear,
-          description: user.description,
-          profilePhotoUrl: user.profilePhotoUrl,
-          campusId: campus?.campusId ?? null,
-          majorId: major?.majorId ?? null,
-          isActive: true,
-          syncedAt,
-        },
-      });
-
-      await tx.trUserHobby.deleteMany({ where: { userId: user.id } });
-      if (hobbies.length) {
-        for (const hobby of hobbies) {
-          await tx.msHobby.upsert({
-            where: { id: hobby.hobbyId },
-            update: {
-              name: hobby.name,
-              isActive: true,
-              syncedAt,
-            },
-            create: {
-              id: hobby.hobbyId,
-              name: hobby.name,
-              isActive: true,
-              syncedAt,
-            },
-          });
-        }
-
-        await tx.trUserHobby.createMany({
-          data: hobbies.map((hobby) => ({
-            userId: user.id,
-            hobbyId: hobby.hobbyId,
-          })),
-        });
-      }
-
-      await tx.trUserPhoto.deleteMany({ where: { userId: user.id } });
-      if (photos.length) {
-        await tx.trUserPhoto.createMany({
-          data: photos.map((photo) => ({
-            userId: user.id,
-            photoId: photo.photoId,
-            url: photo.url,
-            sortOrder: photo.sortOrder,
-            isProfile: photo.isProfile,
-          })),
-        });
-      }
-    });
+    await this.syncRepository.syncUser(user, campus, major, hobbies, photos);
 
     this.logger.log(`Synced user ${user.id} from pubsub`);
   }

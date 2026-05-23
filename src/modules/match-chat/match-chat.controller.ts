@@ -16,7 +16,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { ChatService } from './match-chat.service';
+import { ChatService } from '@/modules/match-chat/match-chat.service';
 import {
   ConversationDto,
   ConversationWithMessagesDto,
@@ -34,8 +34,8 @@ import {
   SwipeResultDto,
   SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
-import { PresenceService } from './presence.service';
-import { MatchService } from './match.service';
+import { PresenceService } from '@/modules/match-chat/presence.service';
+import { MatchService } from '@/modules/match-chat/match.service';
 
 @ApiTags('messages')
 @Controller('messages')

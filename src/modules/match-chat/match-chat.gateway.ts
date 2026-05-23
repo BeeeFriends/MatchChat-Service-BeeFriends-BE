@@ -10,10 +10,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
-import { MessageEncryptionService } from '../../common/crypto/message-encryption.service';
-import { ChatService } from './match-chat.service';
-import { PresenceService } from './presence.service';
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { MessageEncryptionService } from '@/common/crypto/message-encryption.service';
+import { ChatService } from '@/modules/match-chat/match-chat.service';
+import { PresenceService } from '@/modules/match-chat/presence.service';
 import { CHAT_EVENTS, CreateMessageDto } from '@beefriends/shared-kernel/dto';
 import type {
   MessageDto,

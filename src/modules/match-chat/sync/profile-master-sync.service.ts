@@ -3,15 +3,15 @@ import type {
   CampusEventPayload,
   DepartmentEventPayload,
 } from '@beefriends/shared-kernel';
-import { PUBSUB_CHANNELS, PubSubService } from '../../../common/pub-sub';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { SyncRepository } from '@/modules/match-chat/sync/sync.repository';
 
 @Injectable()
 export class ProfileMasterSyncService implements OnModuleInit {
   private readonly logger = new Logger(ProfileMasterSyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly syncRepository: SyncRepository,
     private readonly pubSub: PubSubService,
   ) {}
 
@@ -40,29 +40,11 @@ export class ProfileMasterSyncService implements OnModuleInit {
     if (!this.isCampusEventPayload(payload)) return;
 
     if (payload.type === 'campus.deleted') {
-      await this.prisma.msCampus.updateMany({
-        where: { id: payload.campusId },
-        data: { isActive: false, syncedAt: new Date() },
-      });
+      await this.syncRepository.deactivateCampus(payload.campusId);
       return;
     }
 
-    await this.prisma.msCampus.upsert({
-      where: { id: payload.campus.id },
-      update: {
-        name: payload.campus.name,
-        address: payload.campus.address,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-      create: {
-        id: payload.campus.id,
-        name: payload.campus.name,
-        address: payload.campus.address,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-    });
+    await this.syncRepository.syncCampus(payload.campus);
 
     this.logger.log(`Synced campus ${payload.campus.id} from pubsub`);
   }
@@ -71,27 +53,11 @@ export class ProfileMasterSyncService implements OnModuleInit {
     if (!this.isDepartmentEventPayload(payload)) return;
 
     if (payload.type === 'department.deleted') {
-      await this.prisma.msDepartment.updateMany({
-        where: { id: payload.departmentId },
-        data: { isActive: false, syncedAt: new Date() },
-      });
+      await this.syncRepository.deactivateDepartment(payload.departmentId);
       return;
     }
 
-    await this.prisma.msDepartment.upsert({
-      where: { id: payload.department.id },
-      update: {
-        name: payload.department.name,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-      create: {
-        id: payload.department.id,
-        name: payload.department.name,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-    });
+    await this.syncRepository.syncDepartment(payload.department);
 
     this.logger.log(`Synced department ${payload.department.id} from pubsub`);
   }

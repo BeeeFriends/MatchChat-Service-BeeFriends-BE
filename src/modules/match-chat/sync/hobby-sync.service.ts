@@ -1,14 +1,14 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { HobbyEventPayload } from '@beefriends/shared-kernel';
-import { PUBSUB_CHANNELS, PubSubService } from '../../../common/pub-sub';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { SyncRepository } from '@/modules/match-chat/sync/sync.repository';
 
 @Injectable()
 export class HobbySyncService implements OnModuleInit {
   private readonly logger = new Logger(HobbySyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly syncRepository: SyncRepository,
     private readonly pubSub: PubSubService,
   ) {}
 
@@ -28,32 +28,13 @@ export class HobbySyncService implements OnModuleInit {
     if (!this.isHobbyEventPayload(payload)) return;
 
     if (payload.type === 'hobby.deleted') {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.trUserHobby.deleteMany({
-          where: { hobbyId: payload.hobbyId },
-        });
-        await tx.msHobby.updateMany({
-          where: { id: payload.hobbyId },
-          data: { isActive: false, syncedAt: new Date() },
-        });
-      });
+      await this.syncRepository.deleteHobbyRelationsAndDeactivate(
+        payload.hobbyId,
+      );
       return;
     }
 
-    await this.prisma.msHobby.upsert({
-      where: { id: payload.hobby.id },
-      update: {
-        name: payload.hobby.name,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-      create: {
-        id: payload.hobby.id,
-        name: payload.hobby.name,
-        isActive: true,
-        syncedAt: new Date(),
-      },
-    });
+    await this.syncRepository.syncHobby(payload.hobby);
 
     this.logger.log(`Synced hobby ${payload.hobby.id} from pubsub`);
   }

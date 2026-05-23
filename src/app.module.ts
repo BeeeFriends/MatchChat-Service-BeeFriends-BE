@@ -1,7 +1,7 @@
 import { Controller, Get, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ChatModule } from './modules/match-chat/match-chat.module';
-import { PrismaModule } from './prisma/prisma.module';
+import { ChatModule } from '@/modules/match-chat/match-chat.module';
+import { PrismaModule } from '@/prisma/prisma.module';
 
 @Controller('health')
 class HealthController {

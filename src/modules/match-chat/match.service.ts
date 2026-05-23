@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MatchStatus, Prisma } from '@prisma/match-chat-client';
+import { Prisma } from '@prisma/match-chat-client';
 import {
   DiscoverMatchesQueryDto,
   MatchDto,
@@ -14,61 +14,17 @@ import {
   SwipeResultDto,
   SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
-import { PUBSUB_CHANNELS, PubSubService } from '../../common/pub-sub';
-import { PrismaService } from '../../prisma/prisma.service';
-
-type PrismaClientLike = PrismaService | Prisma.TransactionClient;
-
-type UserProfileRecord = Prisma.MsUserGetPayload<{
-  include: {
-    campus: true;
-    major: true;
-    hobbies: {
-      include: {
-        hobby: true;
-      };
-    };
-    photos: true;
-  };
-}>;
-
-type MatchRecord = {
-  id: string;
-  firstUserId: number;
-  secondUserId: number;
-  status: MatchStatus;
-  conversationId: string | null;
-  matchedAt: Date;
-  firstUser: UserProfileRecord;
-  secondUser: UserProfileRecord;
-};
-
-const userProfileInclude = {
-  campus: true,
-  major: true,
-  hobbies: {
-    where: { hobby: { isActive: true } },
-    include: { hobby: true },
-    orderBy: { hobbyId: 'asc' as const },
-  },
-  photos: {
-    orderBy: [{ sortOrder: 'asc' as const }, { photoId: 'asc' as const }],
-  },
-};
-
-const matchInclude = {
-  firstUser: {
-    include: userProfileInclude,
-  },
-  secondUser: {
-    include: userProfileInclude,
-  },
-};
+import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
+import { MatchRepository } from '@/modules/match-chat/match.repository';
+import {
+  toMatchDto,
+  toProfileDto,
+} from '@/modules/match-chat/match-profile.mapper';
 
 @Injectable()
 export class MatchService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly matchRepository: MatchRepository,
     private readonly pubSub: PubSubService,
   ) {}
 
@@ -78,24 +34,11 @@ export class MatchService {
 
     await this.ensureUsersActive([userId]);
 
-    const swipes = await this.prisma.matchSwipe.findMany({
-      where: { swiperId: userId },
-      select: { targetId: true },
-    });
-    const activeMatches = await this.prisma.userMatch.findMany({
-      where: {
-        status: 'ACTIVE',
-        OR: [{ firstUserId: userId }, { secondUserId: userId }],
-      },
-      select: { firstUserId: true, secondUserId: true },
-    });
-    const unmatchedMatches = await this.prisma.userMatch.findMany({
-      where: {
-        status: 'UNMATCHED',
-        OR: [{ firstUserId: userId }, { secondUserId: userId }],
-      },
-      select: { firstUserId: true, secondUserId: true },
-    });
+    const [swipes, activeMatches, unmatchedMatches] = await Promise.all([
+      this.matchRepository.findSwipedTargetIds(userId),
+      this.matchRepository.findActiveMatchPairsForUser(userId),
+      this.matchRepository.findUnmatchedPairsForUser(userId),
+    ]);
     const unmatchedUserIds = new Set(
       unmatchedMatches.map((match) =>
         match.firstUserId === userId ? match.secondUserId : match.firstUserId,
@@ -124,14 +67,12 @@ export class MatchService {
         : undefined,
     };
 
-    const users = await this.prisma.msUser.findMany({
+    const users = await this.matchRepository.findDiscoverableUsers(
       where,
-      include: userProfileInclude,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
-      take: limit,
-    });
+      limit,
+    );
 
-    return users.map((user) => this.toProfileDto(user));
+    return users.map((user) => toProfileDto(user));
   }
 
   async swipe(dto: SwipeUserDto): Promise<SwipeResultDto> {
@@ -142,92 +83,14 @@ export class MatchService {
       throw new BadRequestException('Cannot swipe yourself');
     }
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      await this.ensureUsersActive([swiperId, targetUserId], tx);
+    await this.ensureUsersActive([swiperId, targetUserId]);
 
-      await tx.matchSwipe.upsert({
-        where: {
-          swiperId_targetId: {
-            swiperId,
-            targetId: targetUserId,
-          },
-        },
-        update: { decision: dto.decision },
-        create: {
-          swiperId,
-          targetId: targetUserId,
-          decision: dto.decision,
-        },
-      });
-
-      if (dto.decision !== 'LIKE') {
-        return { isMatch: false, matchId: null };
-      }
-
-      const reverseLike = await tx.matchSwipe.findUnique({
-        where: {
-          swiperId_targetId: {
-            swiperId: targetUserId,
-            targetId: swiperId,
-          },
-        },
-      });
-
-      if (reverseLike?.decision !== 'LIKE') {
-        return { isMatch: false, matchId: null };
-      }
-
-      const [firstUserId, secondUserId] = this.orderUserIds(
-        swiperId,
-        targetUserId,
-      );
-      const existingMatch = await tx.userMatch.findUnique({
-        where: {
-          firstUserId_secondUserId: {
-            firstUserId,
-            secondUserId,
-          },
-        },
-      });
-
-      if (existingMatch?.status === 'ACTIVE') {
-        return { isMatch: true, matchId: existingMatch.id, shouldNotify: false };
-      }
-
-      const conversationId =
-        existingMatch?.conversationId ??
-        (
-          await tx.conversation.create({
-            data: {
-              isGroup: false,
-              participants: {
-                create: [{ userId: swiperId }, { userId: targetUserId }],
-              },
-            },
-            select: { id: true },
-          })
-        ).id;
-
-      const match = existingMatch
-        ? await tx.userMatch.update({
-            where: { id: existingMatch.id },
-            data: {
-              status: 'ACTIVE',
-              conversationId,
-              matchedAt: new Date(),
-              unmatchedAt: null,
-            },
-          })
-        : await tx.userMatch.create({
-            data: {
-              firstUserId,
-              secondUserId,
-              conversationId,
-            },
-          });
-
-      return { isMatch: true, matchId: match.id, shouldNotify: true };
-    });
+    const result = await this.matchRepository.runSwipeTransaction(
+      swiperId,
+      targetUserId,
+      dto.decision,
+      this.orderUserIds,
+    );
 
     if (result.isMatch && result.matchId && result.shouldNotify) {
       await this.publishMatchCreated(result.matchId);
@@ -247,23 +110,13 @@ export class MatchService {
   async getMatches(userId: number): Promise<MatchDto[]> {
     await this.ensureUsersActive([userId]);
 
-    const matches = await this.prisma.userMatch.findMany({
-      where: {
-        status: 'ACTIVE',
-        OR: [{ firstUserId: userId }, { secondUserId: userId }],
-      },
-      include: matchInclude,
-      orderBy: { matchedAt: 'desc' },
-    });
+    const matches = await this.matchRepository.findActiveMatchesForUser(userId);
 
     return Promise.all(matches.map((match) => this.toMatchDto(match, userId)));
   }
 
   async getCampuses(): Promise<MatchProfileCampusDto[]> {
-    const campuses = await this.prisma.msCampus.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
+    const campuses = await this.matchRepository.findActiveCampuses();
 
     return campuses.map((campus) => ({
       id: campus.id,
@@ -273,10 +126,7 @@ export class MatchService {
   }
 
   async getMajors(): Promise<MatchProfileMajorDto[]> {
-    const majors = await this.prisma.msDepartment.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
+    const majors = await this.matchRepository.findActiveMajors();
 
     return majors.map((major) => ({
       id: major.id,
@@ -285,10 +135,7 @@ export class MatchService {
   }
 
   async getHobbies(): Promise<MatchProfileHobbyDto[]> {
-    const hobbies = await this.prisma.msHobby.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
+    const hobbies = await this.matchRepository.findActiveHobbies();
 
     return hobbies.map((hobby) => ({
       id: hobby.id,
@@ -297,13 +144,7 @@ export class MatchService {
   }
 
   async getMatchByIdForUser(id: string, userId: number): Promise<MatchDto> {
-    const match = await this.prisma.userMatch.findFirst({
-      where: {
-        id,
-        OR: [{ firstUserId: userId }, { secondUserId: userId }],
-      },
-      include: matchInclude,
-    });
+    const match = await this.matchRepository.findMatchByIdForUser(id, userId);
 
     if (!match) throw new NotFoundException('Match not found');
 
@@ -311,53 +152,21 @@ export class MatchService {
   }
 
   async unmatch(id: string, userId: number): Promise<MatchDto> {
-    const currentMatch = await this.prisma.userMatch.findFirst({
-      where: {
-        id,
-        status: 'ACTIVE',
-        OR: [{ firstUserId: userId }, { secondUserId: userId }],
-      },
-    });
+    const currentMatch = await this.matchRepository.findActiveMatchByIdForUser(
+      id,
+      userId,
+    );
 
     if (!currentMatch) throw new NotFoundException('Match not found');
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.userMatch.update({
-        where: { id },
-        data: {
-          status: 'UNMATCHED',
-          unmatchedAt: new Date(),
-        },
-      });
-
-      await tx.matchSwipe.deleteMany({
-        where: {
-          OR: [
-            {
-              swiperId: currentMatch.firstUserId,
-              targetId: currentMatch.secondUserId,
-            },
-            {
-              swiperId: currentMatch.secondUserId,
-              targetId: currentMatch.firstUserId,
-            },
-          ],
-        },
-      });
-    });
+    await this.matchRepository.unmatchAndDeleteSwipes(currentMatch);
 
     return this.getMatchByIdForUser(id, userId);
   }
 
-  private async ensureUsersActive(
-    userIds: number[],
-    client: PrismaClientLike = this.prisma,
-  ) {
+  private async ensureUsersActive(userIds: number[]) {
     const uniqueUserIds = Array.from(new Set(userIds));
-    const users = await client.msUser.findMany({
-      where: { id: { in: uniqueUserIds }, isActive: true },
-      select: { id: true },
-    });
+    const users = await this.matchRepository.findActiveUserIds(uniqueUserIds);
     const existingUserIds = new Set(users.map((user) => user.id));
     const missingUserIds = uniqueUserIds.filter(
       (userId) => !existingUserIds.has(userId),
@@ -370,78 +179,29 @@ export class MatchService {
     }
   }
 
+  private async toMatchDto(matchId: string, userId: number): Promise<MatchDto>;
   private async toMatchDto(
-    match: MatchRecord,
+    match: Awaited<ReturnType<MatchRepository['findMatchByIdForUser']>>,
+    userId: number,
+  ): Promise<MatchDto>;
+  private async toMatchDto(
+    matchOrId:
+      | string
+      | Awaited<ReturnType<MatchRepository['findMatchByIdForUser']>>,
     userId: number,
   ): Promise<MatchDto> {
-    const matchedUser =
-      match.firstUserId === userId ? match.secondUser : match.firstUser;
+    const match =
+      typeof matchOrId === 'string'
+        ? await this.matchRepository.findMatchByIdForUser(matchOrId, userId)
+        : matchOrId;
+
+    if (!match) throw new NotFoundException('Match not found');
+
     const conversation = match.conversationId
-      ? await this.prisma.conversation.findUnique({
-          where: { id: match.conversationId },
-          select: {
-            lastMessagePreview: true,
-            lastMessageSenderId: true,
-          },
-        })
+      ? await this.matchRepository.findConversationPreview(match.conversationId)
       : null;
 
-    return {
-      id: match.id,
-      userId,
-      matchedUser: this.toProfileDto(matchedUser),
-      conversationId: match.conversationId,
-      status: match.status,
-      isNew: !conversation?.lastMessagePreview,
-      lastMessagePreview: conversation?.lastMessagePreview ?? null,
-      lastMessageSenderId: conversation?.lastMessageSenderId ?? null,
-      matchedAt: match.matchedAt,
-    };
-  }
-
-  private toProfileDto(user: UserProfileRecord): MatchProfileDto {
-    return {
-      id: user.id,
-      displayName: user.displayName,
-      binusianEmail: user.binusianEmail,
-      phoneNumber: user.phoneNumber,
-      gender: user.gender,
-      age: user.age,
-      binusianYear: user.binusianYear,
-      description: user.description,
-      profilePhotoUrl: user.profilePhotoUrl,
-      campus: user.campus?.isActive
-        ? {
-            id: user.campus.id,
-            name: user.campus.name,
-            address: user.campus.address,
-          }
-        : null,
-      major: user.major?.isActive
-        ? {
-            id: user.major.id,
-            name: user.major.name,
-          }
-        : null,
-      hobbies: this.toHobbies(user.hobbies),
-      photos: this.toPhotos(user.photos),
-    };
-  }
-
-  private toHobbies(hobbies: UserProfileRecord['hobbies']) {
-    return hobbies.map((hobby) => ({
-      id: hobby.hobby.id,
-      name: hobby.hobby.name,
-    }));
-  }
-
-  private toPhotos(photos: UserProfileRecord['photos']) {
-    return photos.map((photo) => ({
-      id: photo.photoId,
-      url: photo.url,
-      sortOrder: photo.sortOrder,
-      isProfile: photo.isProfile,
-    }));
+    return toMatchDto(match, userId, conversation);
   }
 
   private orderUserIds(
@@ -460,15 +220,7 @@ export class MatchService {
 
   private async publishMatchCreated(matchId: string) {
     try {
-      const match = await this.prisma.userMatch.findUnique({
-        where: { id: matchId },
-        select: {
-          id: true,
-          firstUserId: true,
-          secondUserId: true,
-          conversationId: true,
-        },
-      });
+      const match = await this.matchRepository.findMatchEventById(matchId);
 
       if (!match) return;
 

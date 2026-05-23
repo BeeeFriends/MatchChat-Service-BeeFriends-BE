@@ -1,8 +1,8 @@
 import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { AppModule } from './app.module';
-import { HttpExceptionFilter, ResponseInterceptor } from './common';
+import { AppModule } from '@/app.module';
+import { HttpExceptionFilter, ResponseInterceptor } from '@/common';
 
 async function bootstrap() {
   const apiPrefix = process.env.API_PREFIX ?? 'v1/matchchat';
