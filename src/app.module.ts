@@ -1,5 +1,4 @@
 import { Controller, Get, Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { ChatModule } from '@/modules/match-chat/match-chat.module';
 import { PrismaModule } from '@/prisma/prisma.module';
 
@@ -17,7 +16,7 @@ class HealthController {
 }
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, ChatModule],
+  imports: [PrismaModule, ChatModule],
   controllers: [HealthController],
 })
 export class AppModule {}
