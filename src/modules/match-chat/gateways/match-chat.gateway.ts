@@ -12,8 +12,9 @@ import {
 import { Server, Socket } from 'socket.io';
 import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
 import { MessageEncryptionService } from '@/common/crypto/message-encryption.service';
-import { ChatService } from '@/modules/match-chat/match-chat.service';
-import { PresenceService } from '@/modules/match-chat/presence.service';
+import { ChatNotificationService } from '@/modules/match-chat/chat/chat-notification.service';
+import { ChatService } from '@/modules/match-chat/chat/chat.service';
+import { PresenceService } from '@/modules/match-chat/presence/presence.service';
 import { CHAT_EVENTS, CreateMessageDto } from '@beefriends/shared-kernel/dto';
 import type {
   MessageDto,
@@ -37,6 +38,7 @@ export class ChatGateway
 
   constructor(
     private readonly chatService: ChatService,
+    private readonly chatNotificationService: ChatNotificationService,
     private readonly presenceService: PresenceService,
     private readonly pubSub: PubSubService,
     private readonly messageEncryption: MessageEncryptionService,
@@ -149,7 +151,7 @@ export class ChatGateway
       userId: Number(data.userId),
     };
 
-    await this.chatService.publishMessageRead(event);
+    await this.chatNotificationService.publishMessageRead(event);
 
     return event;
   }

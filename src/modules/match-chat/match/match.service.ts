@@ -14,25 +14,30 @@ import {
   SwipeResultDto,
   SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
-import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
-import { MatchRepository } from '@/modules/match-chat/match.repository';
+import { MatchNotificationService } from '@/modules/match-chat/match/match-notification.service';
+import { MatchRepository } from '@/modules/match-chat/match/match.repository';
 import {
   toMatchDto,
   toProfileDto,
-} from '@/modules/match-chat/match-profile.mapper';
+} from '@/modules/match-chat/match/match-profile.mapper';
+import { MatchChatUserValidationService } from '@/modules/match-chat/users/user-validation.service';
 
 @Injectable()
 export class MatchService {
   constructor(
     private readonly matchRepository: MatchRepository,
-    private readonly pubSub: PubSubService,
+    private readonly matchNotificationService: MatchNotificationService,
+    private readonly userValidationService: MatchChatUserValidationService,
   ) {}
 
   async discover(query: DiscoverMatchesQueryDto): Promise<MatchProfileDto[]> {
     const userId = Number(query.userId);
     const limit = this.clampLimit(query.limit);
 
-    await this.ensureUsersActive([userId]);
+    await this.userValidationService.ensureActiveUsers(
+      [userId],
+      'match chat service',
+    );
 
     const [swipes, activeMatches, unmatchedMatches] = await Promise.all([
       this.matchRepository.findSwipedTargetIds(userId),
@@ -83,7 +88,10 @@ export class MatchService {
       throw new BadRequestException('Cannot swipe yourself');
     }
 
-    await this.ensureUsersActive([swiperId, targetUserId]);
+    await this.userValidationService.ensureActiveUsers(
+      [swiperId, targetUserId],
+      'match chat service',
+    );
 
     const result = await this.matchRepository.runSwipeTransaction(
       swiperId,
@@ -93,7 +101,7 @@ export class MatchService {
     );
 
     if (result.isMatch && result.matchId && result.shouldNotify) {
-      await this.publishMatchCreated(result.matchId);
+      await this.matchNotificationService.publishMatchCreated(result.matchId);
     }
 
     return {
@@ -108,7 +116,10 @@ export class MatchService {
   }
 
   async getMatches(userId: number): Promise<MatchDto[]> {
-    await this.ensureUsersActive([userId]);
+    await this.userValidationService.ensureActiveUsers(
+      [userId],
+      'match chat service',
+    );
 
     const matches = await this.matchRepository.findActiveMatchesForUser(userId);
 
@@ -164,21 +175,6 @@ export class MatchService {
     return this.getMatchByIdForUser(id, userId);
   }
 
-  private async ensureUsersActive(userIds: number[]) {
-    const uniqueUserIds = Array.from(new Set(userIds));
-    const users = await this.matchRepository.findActiveUserIds(uniqueUserIds);
-    const existingUserIds = new Set(users.map((user) => user.id));
-    const missingUserIds = uniqueUserIds.filter(
-      (userId) => !existingUserIds.has(userId),
-    );
-
-    if (missingUserIds.length) {
-      throw new BadRequestException(
-        `User not synced to match chat service: ${missingUserIds.join(', ')}`,
-      );
-    }
-  }
-
   private async toMatchDto(matchId: string, userId: number): Promise<MatchDto>;
   private async toMatchDto(
     match: Awaited<ReturnType<MatchRepository['findMatchByIdForUser']>>,
@@ -216,20 +212,5 @@ export class MatchService {
   private clampLimit(limit?: number) {
     if (!limit) return 20;
     return Math.min(Math.max(limit, 1), 50);
-  }
-
-  private async publishMatchCreated(matchId: string) {
-    try {
-      const match = await this.matchRepository.findMatchEventById(matchId);
-
-      if (!match) return;
-
-      await this.pubSub.publish(PUBSUB_CHANNELS.MATCH_EVENTS, {
-        type: 'match.created',
-        match,
-      });
-    } catch {
-      // Matching must not fail because notification delivery is unavailable.
-    }
   }
 }

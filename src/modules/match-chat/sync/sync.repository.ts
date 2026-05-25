@@ -1,45 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import type {
-  CampusEventPayload,
-  DepartmentEventPayload,
-  HobbyEventPayload,
-} from '@beefriends/shared-kernel';
+  NormalizedCampus,
+  NormalizedHobby,
+  NormalizedMajor,
+  NormalizedPhoto,
+  SyncedCampusPayload,
+  SyncedDepartmentPayload,
+  SyncedHobbyPayload,
+  SyncedUser,
+} from '@/types/match-chat';
 import { PrismaService } from '@/prisma/prisma.service';
-
-type SyncedUser = {
-  id: number;
-  displayName?: string | null;
-  binusianEmail?: string | null;
-  phoneNumber?: string | null;
-  gender?: string | null;
-  age?: number | null;
-  binusianYear?: number | null;
-  description?: string | null;
-  profilePhotoUrl?: string | null;
-};
-
-type NormalizedCampus = {
-  campusId: number;
-  name: string;
-  address: string | null;
-};
-
-type NormalizedMajor = {
-  majorId: number;
-  name: string;
-};
-
-type NormalizedHobby = {
-  hobbyId: number;
-  name: string;
-};
-
-type NormalizedPhoto = {
-  photoId: number;
-  url: string;
-  sortOrder: number;
-  isProfile: boolean;
-};
 
 @Injectable()
 export class SyncRepository {
@@ -180,7 +150,7 @@ export class SyncRepository {
     });
   }
 
-  syncCampus(campus: Extract<CampusEventPayload, { campus: unknown }>['campus']) {
+  syncCampus(campus: SyncedCampusPayload) {
     return this.prisma.msCampus.upsert({
       where: { id: campus.id },
       update: {
@@ -206,9 +176,7 @@ export class SyncRepository {
     });
   }
 
-  syncDepartment(
-    department: Extract<DepartmentEventPayload, { department: unknown }>['department'],
-  ) {
+  syncDepartment(department: SyncedDepartmentPayload) {
     return this.prisma.msDepartment.upsert({
       where: { id: department.id },
       update: {
@@ -237,7 +205,7 @@ export class SyncRepository {
     });
   }
 
-  syncHobby(hobby: Extract<HobbyEventPayload, { hobby: unknown }>['hobby']) {
+  syncHobby(hobby: SyncedHobbyPayload) {
     return this.prisma.msHobby.upsert({
       where: { id: hobby.id },
       update: {

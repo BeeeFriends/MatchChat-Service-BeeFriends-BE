@@ -2,31 +2,13 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { UserEventPayload } from '@beefriends/shared-kernel';
 import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
 import { SyncRepository } from '@/modules/match-chat/sync/sync.repository';
-
-type NormalizedHobby = {
-  hobbyId: number;
-  name: string;
-};
-
-type NormalizedCampus = {
-  campusId: number;
-  name: string;
-  address: string | null;
-};
-
-type NormalizedMajor = {
-  majorId: number;
-  name: string;
-};
-
-type NormalizedPhoto = {
-  photoId: number;
-  url: string;
-  sortOrder: number;
-  isProfile: boolean;
-};
-
-type SyncedUserPayload = Extract<UserEventPayload, { user: unknown }>['user'];
+import type {
+  NormalizedCampus,
+  NormalizedHobby,
+  NormalizedMajor,
+  NormalizedPhoto,
+  SyncedUserPayload,
+} from '@/types/match-chat';
 
 @Injectable()
 export class UserSyncService implements OnModuleInit {

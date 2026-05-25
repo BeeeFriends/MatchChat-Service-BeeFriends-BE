@@ -7,15 +7,9 @@ import {
 import { randomUUID } from 'crypto';
 import type { Server } from 'socket.io';
 import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
-import { PresenceRepository } from '@/modules/match-chat/presence.repository';
+import { PresenceRepository } from '@/modules/match-chat/presence/presence.repository';
+import type { PresenceChangePayload } from '@/types/match-chat';
 import { CHAT_EVENTS, PresenceDto } from '@beefriends/shared-kernel/dto';
-
-type PresenceChangePayload = PresenceDto & {
-  type: 'presence.changed';
-  socketId: string;
-  instanceId: string;
-  timestamp: string;
-};
 
 @Injectable()
 export class PresenceService implements OnModuleInit, OnModuleDestroy {

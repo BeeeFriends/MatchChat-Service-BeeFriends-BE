@@ -7,16 +7,6 @@ import type { CreateConversationDto } from '@beefriends/shared-kernel/dto';
 export class ChatRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findActiveUserIds(userIds: number[]) {
-    return this.prisma.msUser.findMany({
-      where: {
-        id: { in: userIds },
-        isActive: true,
-      },
-      select: { id: true },
-    });
-  }
-
   async createMessage(
     conversationId: string,
     senderId: number,

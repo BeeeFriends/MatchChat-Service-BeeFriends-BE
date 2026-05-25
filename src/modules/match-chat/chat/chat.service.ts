@@ -1,67 +1,38 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { PUBSUB_CHANNELS, PubSubService } from '@/common/pub-sub';
 import { MessageEncryptionService } from '@/common/crypto/message-encryption.service';
-import { ChatRepository } from '@/modules/match-chat/chat.repository';
+import { ChatNotificationService } from '@/modules/match-chat/chat/chat-notification.service';
+import { ChatRepository } from '@/modules/match-chat/chat/chat.repository';
+import { MatchChatUserValidationService } from '@/modules/match-chat/users/user-validation.service';
+import type { ConversationRecord, MessageRecord } from '@/types/match-chat';
 import {
   ConversationDto,
   ConversationWithMessagesDto,
   CreateConversationDto,
   CreateMessageDto,
   MessageDto,
-  MessageReadEvent,
 } from '@beefriends/shared-kernel/dto';
-
-type MessageRecord = {
-  id: string;
-  conversationId: string;
-  senderId: number;
-  content: string;
-  attachmentUrls: string[];
-  isEdited: boolean;
-  isDeleted: boolean;
-  readBy: number[];
-  replyToMessageId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-type ConversationRecord = {
-  id: string;
-  name: string | null;
-  description: string | null;
-  isGroup: boolean;
-  lastMessageId: string | null;
-  lastMessagePreview: string | null;
-  lastMessageSenderId: number | null;
-  createdAt: Date;
-  updatedAt: Date;
-  participants?: { userId: number }[];
-  messages?: MessageRecord[];
-  _count?: {
-    messages?: number;
-  };
-};
 
 @Injectable()
 export class ChatService {
-  private readonly logger = new Logger(ChatService.name);
-
   constructor(
     private readonly chatRepository: ChatRepository,
-    private readonly pubSub: PubSubService,
+    private readonly chatNotificationService: ChatNotificationService,
     private readonly messageEncryption: MessageEncryptionService,
+    private readonly userValidationService: MatchChatUserValidationService,
   ) {}
 
   async createMessage(
     createMessageDto: CreateMessageDto,
     senderId: number,
   ): Promise<MessageDto> {
-    await this.ensureUsersSynced([senderId]);
+    await this.userValidationService.ensureActiveUsers(
+      [senderId],
+      'chat service',
+    );
     await this.ensureConversationAvailable(createMessageDto.conversationId);
 
     const message = await this.chatRepository.createMessage(
@@ -82,7 +53,7 @@ export class ChatService {
     }
 
     const messageDto = this.toMessageDto(message);
-    await this.publishMessageCreated(messageDto);
+    await this.chatNotificationService.publishMessageCreated(messageDto);
 
     return messageDto;
   }
@@ -119,33 +90,6 @@ export class ChatService {
     return this.toMessageDto(message.message);
   }
 
-  async publishMessageRead(event: MessageReadEvent) {
-    try {
-      const participantIds = await this.getConversationParticipantIds(
-        event.conversationId,
-      );
-
-      await this.pubSub.publish(PUBSUB_CHANNELS.CHAT_READS, {
-        type: 'message.read',
-        ...event,
-        participantIds,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Failed to publish read receipt ${event.messageId}: ${
-          (error as Error).message
-        }`,
-      );
-    }
-  }
-
-  async getConversationParticipantIds(conversationId: string) {
-    const participants =
-      await this.chatRepository.findConversationParticipantIds(conversationId);
-
-    return participants.map((participant) => participant.userId);
-  }
-
   async createConversation(
     createConversationDto: CreateConversationDto,
   ): Promise<ConversationDto> {
@@ -157,7 +101,10 @@ export class ChatService {
       throw new BadRequestException('At least one participant is required');
     }
 
-    await this.ensureUsersSynced(participantIds);
+    await this.userValidationService.ensureActiveUsers(
+      participantIds,
+      'chat service',
+    );
 
     const conversation = await this.chatRepository.createConversation(
       createConversationDto,
@@ -296,50 +243,5 @@ export class ChatService {
     );
 
     return hasImage ? 'image' : 'file';
-  }
-
-  private async publishMessageCreated(message: MessageDto) {
-    try {
-      const [participants, sender] = await Promise.all([
-        this.chatRepository.findConversationParticipantIds(
-          message.conversationId,
-        ),
-        this.chatRepository.findSenderForNotification(message.senderId),
-      ]);
-
-      await this.pubSub.publish(PUBSUB_CHANNELS.CHAT_MESSAGES, {
-        type: 'message.created',
-        conversationId: message.conversationId,
-        participantIds: participants.map((participant) => participant.userId),
-        sender,
-        message: this.toBrokerMessage(message),
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Failed to publish message ${message.id}: ${(error as Error).message}`,
-      );
-    }
-  }
-
-  private async ensureUsersSynced(userIds: number[]) {
-    const uniqueUserIds = Array.from(new Set(userIds));
-    const users = await this.chatRepository.findActiveUserIds(uniqueUserIds);
-    const existingUserIds = new Set(users.map((user) => user.id));
-    const missingUserIds = uniqueUserIds.filter(
-      (userId) => !existingUserIds.has(userId),
-    );
-
-    if (missingUserIds.length) {
-      throw new BadRequestException(
-        `User not synced to chat service: ${missingUserIds.join(', ')}`,
-      );
-    }
-  }
-
-  private toBrokerMessage(message: MessageDto): MessageDto {
-    return {
-      ...message,
-      content: this.messageEncryption.encrypt(message.content),
-    };
   }
 }

@@ -16,7 +16,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { ChatService } from '@/modules/match-chat/match-chat.service';
+import { ChatService } from '@/modules/match-chat/chat/chat.service';
 import {
   ConversationDto,
   ConversationWithMessagesDto,
@@ -34,13 +34,17 @@ import {
   SwipeResultDto,
   SwipeUserDto,
 } from '@beefriends/shared-kernel/dto';
-import { PresenceService } from '@/modules/match-chat/presence.service';
-import { MatchService } from '@/modules/match-chat/match.service';
+import { PresenceService } from '@/modules/match-chat/presence/presence.service';
+import { ChatNotificationService } from '@/modules/match-chat/chat/chat-notification.service';
+import { MatchService } from '@/modules/match-chat/match/match.service';
 
 @ApiTags('messages')
 @Controller('messages')
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatNotificationService: ChatNotificationService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Send a message' })
@@ -92,7 +96,7 @@ export class ChatController {
       userId,
     );
 
-    await this.chatService.publishMessageRead({
+    await this.chatNotificationService.publishMessageRead({
       conversationId,
       messageId: message.id,
       userId,

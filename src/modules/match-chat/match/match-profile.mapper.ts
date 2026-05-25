@@ -1,16 +1,9 @@
+import type { MatchDto, MatchProfileDto } from '@beefriends/shared-kernel/dto';
 import type {
-  MatchDto,
-  MatchProfileDto,
-} from '@beefriends/shared-kernel/dto';
-import type {
+  ConversationPreview,
   MatchRecord,
   MatchUserProfile,
-} from '@/modules/match-chat/match-profile.prisma';
-
-type ConversationPreview = {
-  lastMessagePreview: string | null;
-  lastMessageSenderId: number | null;
-} | null;
+} from '@/types/match-chat';
 
 export function toMatchDto(
   match: MatchRecord,

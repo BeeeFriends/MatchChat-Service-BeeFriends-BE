@@ -4,16 +4,20 @@ import {
   ConversationController,
   MatchController,
   PresenceController,
-} from '@/modules/match-chat/match-chat.controller';
+} from '@/modules/match-chat/controllers/match-chat.controller';
 import { PubSubModule } from '@/common/pub-sub';
 import { MessageEncryptionService } from '@/common/crypto/message-encryption.service';
-import { ChatGateway } from '@/modules/match-chat/match-chat.gateway';
-import { ChatRepository } from '@/modules/match-chat/chat.repository';
-import { ChatService } from '@/modules/match-chat/match-chat.service';
-import { MatchRepository } from '@/modules/match-chat/match.repository';
-import { MatchService } from '@/modules/match-chat/match.service';
-import { PresenceRepository } from '@/modules/match-chat/presence.repository';
-import { PresenceService } from '@/modules/match-chat/presence.service';
+import { ChatGateway } from '@/modules/match-chat/gateways/match-chat.gateway';
+import { ChatNotificationService } from '@/modules/match-chat/chat/chat-notification.service';
+import { ChatRepository } from '@/modules/match-chat/chat/chat.repository';
+import { ChatService } from '@/modules/match-chat/chat/chat.service';
+import { MatchNotificationService } from '@/modules/match-chat/match/match-notification.service';
+import { MatchRepository } from '@/modules/match-chat/match/match.repository';
+import { MatchService } from '@/modules/match-chat/match/match.service';
+import { PresenceRepository } from '@/modules/match-chat/presence/presence.repository';
+import { PresenceService } from '@/modules/match-chat/presence/presence.service';
+import { MatchChatUserRepository } from '@/modules/match-chat/users/user.repository';
+import { MatchChatUserValidationService } from '@/modules/match-chat/users/user-validation.service';
 import {
   HobbySyncService,
   ProfileMasterSyncService,
@@ -31,10 +35,14 @@ import { SyncRepository } from '@/modules/match-chat/sync/sync.repository';
   ],
   providers: [
     ChatGateway,
+    ChatNotificationService,
     ChatRepository,
     ChatService,
     HobbySyncService,
     MessageEncryptionService,
+    MatchChatUserRepository,
+    MatchChatUserValidationService,
+    MatchNotificationService,
     MatchRepository,
     MatchService,
     PresenceRepository,

@@ -4,29 +4,13 @@ import { PrismaService } from '@/prisma/prisma.service';
 import {
   MATCH_INCLUDE,
   USER_PROFILE_INCLUDE,
-} from '@/modules/match-chat/match-profile.prisma';
-
-type MatchPair = {
-  firstUserId: number;
-  secondUserId: number;
-};
-
-type SwipeTransactionResult = {
-  isMatch: boolean;
-  matchId: string | null;
-  shouldNotify?: boolean;
-};
+  type MatchPair,
+  type SwipeTransactionResult,
+} from '@/types/match-chat';
 
 @Injectable()
 export class MatchRepository {
   constructor(private readonly prisma: PrismaService) {}
-
-  findActiveUserIds(userIds: number[]) {
-    return this.prisma.msUser.findMany({
-      where: { id: { in: userIds }, isActive: true },
-      select: { id: true },
-    });
-  }
 
   findSwipedTargetIds(userId: number) {
     return this.prisma.matchSwipe.findMany({
@@ -68,7 +52,10 @@ export class MatchRepository {
     swiperId: number,
     targetUserId: number,
     decision: MatchDecision,
-    orderUserIds: (firstUserId: number, secondUserId: number) => [number, number],
+    orderUserIds: (
+      firstUserId: number,
+      secondUserId: number,
+    ) => [number, number],
   ): Promise<SwipeTransactionResult> {
     return this.prisma.$transaction(async (tx) => {
       await tx.matchSwipe.upsert({
@@ -114,7 +101,11 @@ export class MatchRepository {
       });
 
       if (existingMatch?.status === 'ACTIVE') {
-        return { isMatch: true, matchId: existingMatch.id, shouldNotify: false };
+        return {
+          isMatch: true,
+          matchId: existingMatch.id,
+          shouldNotify: false,
+        };
       }
 
       const conversationId =
