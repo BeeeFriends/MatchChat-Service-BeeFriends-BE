@@ -79,14 +79,11 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
     await this.disconnectClients();
   }
 
-  async publish(
-    channel: string,
-    payload: unknown,
-    _options: PublishOptions = {},
-  ) {
+  async publish(channel: string, payload: unknown, options: PublishOptions = {}) {
     this.assertChannel(channel);
 
     const serializedPayload = JSON.stringify(payload);
+    const shouldPersist = options.durable ?? true;
 
     if (!this.publisher?.isReady) {
       await this.dispatch(channel, payload, false);
@@ -95,18 +92,20 @@ export class PubSubService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      await this.publisher.xAdd(
-        channel,
-        '*',
-        { payload: serializedPayload },
-        {
-          TRIM: {
-            strategy: 'MAXLEN',
-            strategyModifier: '~',
-            threshold: this.getStreamMaxLen(),
+      if (shouldPersist) {
+        await this.publisher.xAdd(
+          channel,
+          '*',
+          { payload: serializedPayload },
+          {
+            TRIM: {
+              strategy: 'MAXLEN',
+              strategyModifier: '~',
+              threshold: this.getStreamMaxLen(),
+            },
           },
-        },
-      );
+        );
+      }
       await this.publisher.publish(channel, serializedPayload);
     } catch (error) {
       this.logger.warn(

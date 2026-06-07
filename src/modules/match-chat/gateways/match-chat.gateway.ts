@@ -136,10 +136,7 @@ export class ChatGateway
   }
 
   @SubscribeMessage(CHAT_EVENTS.MESSAGE_READ)
-  async handleMessageRead(
-    @MessageBody() data: MessageReadEvent,
-    @ConnectedSocket() _client: Socket,
-  ) {
+  async handleMessageRead(@MessageBody() data: MessageReadEvent) {
     const message = await this.chatService.markMessageRead(
       data.conversationId,
       data.messageId,

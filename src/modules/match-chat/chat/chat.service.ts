@@ -226,7 +226,7 @@ export class ChatService {
       unreadCount: conversation._count?.messages ?? 0,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
-    } as ConversationDto & { unreadCount: number };
+    };
   }
 
   private createPreview(content: string) {

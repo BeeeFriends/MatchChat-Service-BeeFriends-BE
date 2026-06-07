@@ -241,6 +241,20 @@ export class MatchRepository {
         firstUserId: true,
         secondUserId: true,
         conversationId: true,
+        firstUser: {
+          select: {
+            id: true,
+            displayName: true,
+            profilePhotoUrl: true,
+          },
+        },
+        secondUser: {
+          select: {
+            id: true,
+            displayName: true,
+            profilePhotoUrl: true,
+          },
+        },
       },
     });
   }

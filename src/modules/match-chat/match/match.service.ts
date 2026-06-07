@@ -201,6 +201,7 @@ export class MatchService {
   }
 
   private orderUserIds(
+    this: void,
     firstUserId: number,
     secondUserId: number,
   ): [number, number] {
