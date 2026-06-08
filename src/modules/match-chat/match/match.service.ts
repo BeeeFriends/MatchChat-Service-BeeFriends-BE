@@ -170,7 +170,7 @@ export class MatchService {
 
     if (!currentMatch) throw new NotFoundException('Match not found');
 
-    await this.matchRepository.unmatchAndDeleteSwipes(currentMatch);
+    await this.matchRepository.unmatchAndDeleteSwipe(currentMatch, userId);
 
     return this.getMatchByIdForUser(id, userId);
   }

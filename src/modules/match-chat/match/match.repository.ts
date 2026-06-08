@@ -206,7 +206,10 @@ export class MatchRepository {
     });
   }
 
-  async unmatchAndDeleteSwipes(match: MatchPair & { id: string }) {
+  async unmatchAndDeleteSwipe(match: MatchPair & { id: string }, userId: number) {
+    const targetId =
+      match.firstUserId === userId ? match.secondUserId : match.firstUserId;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.userMatch.update({
         where: { id: match.id },
@@ -218,16 +221,8 @@ export class MatchRepository {
 
       await tx.matchSwipe.deleteMany({
         where: {
-          OR: [
-            {
-              swiperId: match.firstUserId,
-              targetId: match.secondUserId,
-            },
-            {
-              swiperId: match.secondUserId,
-              targetId: match.firstUserId,
-            },
-          ],
+          swiperId: userId,
+          targetId,
         },
       });
     });
